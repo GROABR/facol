@@ -1,25 +1,25 @@
-:root{--bg:#eef2f7;--panel:#fff;--ink:#1d2733;--muted:#6b7785;--line:#d8dee6;--brand:#1f5fbf;--brand2:#174a96;--dark:#0f2f5c;--ok:#1e9e5a;--warn:#c27a00;--bad:#d64040;--soft:#f5f7fa}
+:root{--accent:#7fb0f5;--bg:#eef2f7;--panel:#fff;--ink:#1d2733;--muted:#6b7785;--line:#d8dee6;--brand:#1f5fbf;--brand2:#174a96;--dark:#0f2f5c;--ok:#1e9e5a;--warn:#c27a00;--bad:#d64040;--soft:#f5f7fa}
 *{box-sizing:border-box}html,body{margin:0;height:100%}
 body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;display:flex}
 aside{width:224px;background:var(--dark);color:#cfe0ff;display:flex;flex-direction:column;flex-shrink:0}
 aside .brand{display:flex;align-items:center;gap:10px;padding:16px;font-weight:700;font-size:17px;color:#fff}
-aside .brand .logo{width:32px;height:32px;border-radius:8px;background:#ffd24d;color:var(--dark);display:grid;place-items:center;font-weight:800;font-size:18px}
+aside .brand .logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(145deg,#f4f6f9,#9aa6b4);color:var(--dark);display:grid;place-items:center;font-weight:800;font-size:18px}
 aside .brand small{display:block;font-weight:400;font-size:11px;opacity:.7;letter-spacing:.3px}
 aside nav{overflow:auto}
 aside nav .modsel{margin:4px 12px 8px}
 aside nav .modsel label{display:block;font-size:11px;letter-spacing:.8px;text-transform:uppercase;opacity:.6;margin:0 0 4px 2px}
-aside nav .modsel select{width:100%;background:#ffd24d;color:var(--dark);border:0;font-weight:700;padding:8px 10px;border-radius:7px}
+aside nav .modsel select{width:100%;background:var(--brand);color:#fff;border:1px solid rgba(255,255,255,.25);font-weight:700;padding:8px 10px;border-radius:7px}
 aside nav .mods{display:flex;gap:4px;margin:4px 12px 6px;background:rgba(255,255,255,.08);border-radius:8px;padding:3px}
 aside nav .mods button{flex:1;justify-content:center;padding:7px 6px;border:0;border-radius:6px;font-weight:600}
-aside nav .mods button.on{background:#ffd24d;color:var(--dark)}
+aside nav .mods button.on{background:var(--brand);color:#fff}
 aside nav .sec{padding:12px 18px 4px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;opacity:.55}
 aside nav button{display:flex;width:100%;align-items:center;gap:10px;background:transparent;border:0;color:inherit;font:inherit;padding:9px 18px;cursor:pointer;text-align:left;border-left:3px solid transparent}
 aside nav button:hover{background:rgba(255,255,255,.07);color:#fff}
-aside nav button.on{background:rgba(255,255,255,.12);color:#fff;border-left-color:#ffd24d}
-aside nav .badge{margin-left:auto;background:#ffd24d;color:#222;border-radius:10px;padding:0 7px;font-size:12px;font-weight:700}
+aside nav button.on{background:rgba(255,255,255,.12);color:#fff;border-left-color:var(--accent)}
+aside nav .badge{margin-left:auto;background:var(--accent);color:var(--dark);border-radius:10px;padding:0 7px;font-size:12px;font-weight:700}
 aside .me{margin-top:auto;padding:14px 16px;font-size:12px;border-top:1px solid rgba(255,255,255,.1)}
 aside .me button{background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;padding:4px 10px;margin-top:6px;cursor:pointer;font:inherit}
-aside .me .demo{display:inline-block;background:#ffd24d;color:#222;border-radius:4px;padding:1px 6px;font-weight:700;margin-bottom:6px}
+aside .me .demo{display:inline-block;background:var(--accent);color:var(--dark);border-radius:4px;padding:1px 6px;font-weight:700;margin-bottom:6px}
 main{flex:1;overflow:auto;padding:18px 22px}
 h2{margin:0 0 14px;font-size:21px;display:flex;align-items:center;gap:10px}h3{margin:18px 0 8px;font-size:16px}
 h2 .back{font-size:14px}
@@ -76,6 +76,7 @@ dialog{border:0;border-radius:10px;padding:0;width:600px;max-width:calc(100vw - 
 dialog::backdrop{background:rgba(15,30,50,.45)}
 dialog .hd{padding:14px 18px;font-weight:700;font-size:16px;border-bottom:1px solid var(--line)}
 dialog .bd{padding:16px 18px;max-height:72vh;overflow:auto}dialog .ft{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+.updbar{position:fixed;right:18px;bottom:18px;z-index:90;background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;padding:12px 14px;width:300px;box-shadow:0 10px 30px rgba(15,30,50,.25)}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:6px;opacity:0;transition:.2s;pointer-events:none;z-index:99;max-width:80vw}
 .toast.show{opacity:1}
 .note{background:#fff8e6;border:1px solid #f2dca6;border-radius:6px;padding:9px 12px;margin:8px 0;font-size:13px}
@@ -84,3 +85,6 @@ dialog .bd{padding:16px 18px;max-height:72vh;overflow:auto}dialog .ft{padding:12
 .cmp{display:grid;grid-template-columns:120px 1fr 1fr;gap:6px 12px}.cmp .h{font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase}
 .chg{background:#fff1d6}
 img.prev{max-width:100%;max-height:220px;border:1px solid var(--line);border-radius:6px}
+
+aside nav .modsel select option,aside nav .modsel select optgroup{background:#fff;color:var(--ink)}
+aside .brand .logo img{width:100%;height:100%;object-fit:contain;border-radius:8px}
