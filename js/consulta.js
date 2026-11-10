@@ -63,4 +63,35 @@ async function consultaArchivos(main, tipo, titulo) {
     alDibujar: () => botonesArchivo(main, filas, f => f.nombre)});
 }
 VIEWS.consultaFacturas = main => consultaArchivos(main, 'factura', 'Facturas');
+
+/* ===================== Facturas y complementos de pago (todas las operaciones) ===================== */
+VIEWS.facturas = async main => {
+  const arch = await db.list('archivos', {in: {tipo: ['factura', 'complemento']}, order: 'created_at', desc: true});
+  const opIds = [...new Set(arch.map(a => a.operacion_id).filter(Boolean))];
+  const ops = opIds.length ? await db.list('operaciones', {in: {id: opIds}, select: 'id,folio,cliente_nombre,razon_social,fecha_deposito,modalidad,monto_deposito,estado'}) : [];
+  const conComp = new Set(arch.filter(a => a.tipo === 'complemento').map(a => a.operacion_id));
+  const filas = arch.map(a => { const o = ops.find(x => x.id === a.operacion_id) || {}; return {...a, o, folio: o.folio || '', cliente: o.razon_social || o.cliente_nombre || '', mod: o.modalidad || ''}; });
+  const mods = [...new Set(filas.map(f => f.mod).filter(Boolean))];
+  main.innerHTML = `<h2>Facturas y complementos de pago</h2>
+    <div class="toolbar"><input id="fq" placeholder="Buscar folio, cliente o archivo" style="width:260px">
+      <select id="ft"><option value="">Facturas y complementos</option><option value="factura">Solo facturas</option><option value="complemento">Solo complementos</option></select>
+      <select id="fm"><option value="">Todos los módulos</option>${mods.map(m => `<option value="${esc(m)}" ${!esConsulta() && m === modulo ? 'selected' : ''}>${esc(nombreModulo(m))}</option>`).join('')}</select>
+      <label class="muted">Del</label><input type="date" id="fd"><label class="muted">al</label><input type="date" id="fh">
+      <label><input type="checkbox" id="fs"> Sin complemento</label><span class="sp"></span><span class="muted small" id="fn"></span></div>
+    <div class="tablewrap tall"><table><thead><tr><th>Folio</th><th>Módulo</th><th>Fecha operación</th><th>Cliente</th><th>Tipo</th><th>Archivo</th><th>Subido</th><th></th></tr></thead><tbody id="ftb"></tbody></table></div>`;
+  const draw = () => {
+    const q = Logica.normName(val('fq')), t = val('ft'), m = val('fm'), d = val('fd'), h = val('fh'), sin = val('fs');
+    const rows = filas.filter(f => (!t || f.tipo === t) && (!m || f.mod === m) && (!d || (f.o.fecha_deposito || '') >= d) && (!h || (f.o.fecha_deposito || '') <= h)
+      && (!sin || (f.tipo === 'factura' && !conComp.has(f.operacion_id))) && (!q || Logica.normName([f.folio, f.cliente, f.nombre].join(' ')).includes(q)));
+    $('#fn').textContent = `${rows.length} archivo(s)`;
+    $('#ftb').innerHTML = rows.slice(0, 500).map(f => `<tr><td>${esConsulta() || !f.o.id ? `<b>${esc(f.folio)}</b>` : `<button class="link" data-op="${f.o.id}"><b>${esc(f.folio)}</b></button>`}</td>
+      <td>${esc(nombreModulo(f.mod))}</td><td>${fmtDay(f.o.fecha_deposito)}</td><td>${esc(f.cliente)}</td>
+      <td>${f.tipo === 'factura' ? tag('info', 'factura') + (conComp.has(f.operacion_id) ? '' : ' ' + tag('warn', 'sin complemento')) : tag('ok', 'complemento')}</td>
+      <td>${esc(f.nombre)}</td><td>${fmtDate(f.created_at)}</td><td style="white-space:nowrap">${accionesArchivo(f)}</td></tr>`).join('')
+      || `<tr><td colspan="8" class="empty">${filas.length ? 'Sin resultados' : 'Aún no se han subido facturas ni complementos. Se suben en la pestaña Facturas de cada operación.'}</td></tr>`;
+    botonesArchivo(main, filas, f => f.nombre);
+    $$('[data-op]', main).forEach(b => b.onclick = () => go('operacion', {id: b.dataset.op, tab: 'facturas'}));
+  };
+  ['fq', 'ft', 'fm', 'fd', 'fh', 'fs'].forEach(id => { $('#' + id).oninput = draw; $('#' + id).onchange = draw; }); draw();
+};
 VIEWS.consultaComprobantes = main => consultaArchivos(main, 'comprobante', 'Comprobantes de dispersión');
