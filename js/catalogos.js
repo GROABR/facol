@@ -287,8 +287,9 @@ VIEWS.ajustes = async main => {
         <p class="small muted">Versión ${esc(window.desk ? await desk.version() : 'web')}</p>
         ${db.mode === 'demo' ? '<button class="btn sm" id="aComo">Probar como usuario de solo consulta</button>' : ''}</div>
     </div>
+    <div class="panel" style="margin-top:14px"><h3 style="margin-top:0">Actualizaciones</h3><div id="aUpd"></div></div>
     <div class="panel" style="margin-top:14px"><h3 style="margin-top:0">Usuarios</h3><div id="aUsr" class="muted">Cargando…</div></div>`;
-  panelUsuarios($('#aUsr'));
+  panelUsuarios($('#aUsr')); panelActualizaciones($('#aUpd'));
   if ($('#aComo')) $('#aComo').onclick = () => { sessionStorage.setItem('facol-demo-rol', 'consulta'); location.reload(); };
   const prev = () => $('#aPrev').textContent = val('aPre') + val('aSig'); $('#aPre').oninput = $('#aSig').oninput = prev; prev();
   $('#aFol').onclick = () => guard(async () => { await setConfig('folio_prefijo', val('aPre').toUpperCase()); await setConfig('folio_siguiente', +val('aSig')); }, 'Folios guardados');
@@ -322,7 +323,7 @@ async function panelUsuarios(el) {
 
 async function machote() {
   try { if (await db.exists('plantillas/contrato.docx')) return await (await db.download('plantillas/contrato.docx')).arrayBuffer(); } catch { /* usa el incluido */ }
-  if (window.desk) { const u8 = await desk.machoteIncluido(); return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength); }
+  if (window.desk) { const u8 = await desk.machoteIncluido(); if (!u8) throw new Error('No hay machote de contrato: súbelo una vez en Ajustes → Machote de contrato'); return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength); }
   const r = await fetch('plantillas/CONTRATO BASE.docx');
   if (!r.ok) throw new Error('No hay machote de contrato: súbelo en Ajustes → Machote de contrato');
   return r.arrayBuffer();
