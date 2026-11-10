@@ -49,7 +49,7 @@ async function editarBeneficiario(b) {
     ${hist.length ? `<h3>Historial de cuentas</h3><table><tr><th>Fecha</th><th>Banco</th><th>Cuenta</th><th>CLABE</th><th>Origen</th></tr>${hist.map(h => `<tr><td>${fmtDate(h.cambiado_at)}</td><td>${esc(h.banco || '')}</td><td class="mono">${esc(h.cuenta || '')}</td><td class="mono">${esc(h.clabe || '')}</td><td>${esc(h.origen || '')} ${esc(h.cambiado_por || '')}</td></tr>`).join('')}</table>` : ''}
     ${contratos.length ? `<h3>Contratos</h3>${contratos.map(c => `<div class="file"><span class="nm">📄 Contrato ${fmtDay(c.fecha_inicio)}</span><button class="link" data-ct="${esc(c.path)}">Descargar</button></div>`).join('')}` : ''}`, [
     {label: 'Cancelar'},
-    ...(!nuevo ? [{label: 'Generar contrato', onClick: () => { generarContrato(b); return false; }}] : []),
+    ...(!nuevo ? [{label: 'Borrar persona', cls: 'bad', onClick: () => { setTimeout(() => borrarBeneficiario(b), 50); }}, {label: 'Generar contrato', onClick: () => { generarContrato(b); return false; }}] : []),
     {label: 'Guardar', cls: 'primary', onClick: async () => {
       const row = Object.fromEntries(BEN_CAMPOS.map(([k]) => [k, val('x_' + k) || null]));
       row.nombre = (val('xNom') || nombreCompleto(row)).toUpperCase().replace(/\s+/g, ' '); row.nombre_alt = val('xAlt') || null; row.activo = val('xAct');
@@ -68,6 +68,29 @@ async function editarBeneficiario(b) {
     $('#xCl').innerHTML = r.ok ? tag('ok', 'CLABE válida · ' + (r.banco || 'banco no identificado')) + (r.aviso ? ' ' + tag('warn', r.aviso) : '') : tag('bad', r.motivo); $('#x_clabe').classList.toggle('bad', !r.ok); };
   $('#x_clabe').oninput = chk; $('#x_banco').oninput = chk; chk();
   $$('[data-ct]').forEach(a => a.onclick = () => guard(() => descargarArchivo(a.dataset.ct, `CONTRATO ${b.nombre}.${extDe(a.dataset.ct)}`)));
+}
+
+/** Borra a una persona de la BD con sus contratos y documentos. Las dispersiones en que aparece se conservan
+    (con el nombre y la cuenta que tenían), solo dejan de estar ligadas a ella. */
+async function borrarBeneficiario(b) {
+  const [disp, cons, invs, arch] = await Promise.all([db.list('dispersiones', {eq: {beneficiario_id: b.id}, select: 'id,estado'}), db.list('contratos', {eq: {beneficiario_id: b.id}}),
+    db.list('invitaciones', {eq: {beneficiario_id: b.id}}), db.list('archivos', {eq: {beneficiario_id: b.id}})]);
+  modal(`Borrar a ${b.nombre}`, `<p>Se borra a <b>${esc(b.nombre)}</b> de la base de beneficiarios, con:</p>
+    <ul><li>${cons.length} contrato(s) y ${arch.length} documento(s)</li><li>su historial de cuentas</li>${invs.length ? `<li>${invs.length} encuesta(s) de alta</li>` : ''}</ul>
+    ${disp.length ? `<p class="note">Aparece en ${disp.length} dispersión(es). Esas dispersiones se conservan con el nombre y la cuenta que tenían, pero ya no estarán ligadas a la persona.</p>` : ''}
+    <p class="note">Esto no se puede deshacer.</p><div class="form"><label>Escribe BORRAR para confirmar</label><input id="bbC"></div><div class="err" id="bbE"></div>`, [
+    {label: 'Cancelar'},
+    {label: 'Borrar definitivamente', cls: 'bad', onClick: async () => {
+      if (val('bbC').toUpperCase() !== 'BORRAR') { $('#bbE').textContent = 'Escribe BORRAR'; return false; }
+      if (disp.length) await db.updateWhere('dispersiones', {beneficiario_id: b.id}, {beneficiario_id: null});
+      for (const i of invs) { for (const p of Object.values((i.respuesta || {})._archivos || {})) if (p && !String(p).startsWith('data:')) await db.removeFile(p).catch(() => {}); await db.remove('invitaciones', i.id); }
+      await db.updateWhere('cambios_cuenta', {beneficiario_id: b.id}, {beneficiario_id: null}).catch(() => {});
+      for (const c of cons) { if (c.path) await db.removeFile(c.path).catch(() => {}); await db.remove('contratos', c.id); }
+      for (const a of arch) { await db.removeFile(a.path).catch(() => {}); await db.remove('archivos', a.id); }
+      for (const h of await db.list('beneficiario_cuentas_hist', {eq: {beneficiario_id: b.id}})) await db.remove('beneficiario_cuentas_hist', h.id);
+      await db.remove('beneficiarios', b.id);
+      invalidate('beneficiarios'); toast(`${b.nombre} borrado`); if (view === 'beneficiarios') refresh(); else go('beneficiarios');
+    }}]);
 }
 
 async function importarBd() {
@@ -105,7 +128,7 @@ async function importarBd() {
 VIEWS.cambios = async (main, arg) => {
   const estado = (arg && arg.estado) ?? 'pendiente';
   const [rows, bens] = await Promise.all([db.list('cambios_cuenta', {...(estado ? {eq: {estado}} : {}), order: 'created_at', desc: true}), cat('beneficiarios', true)]);
-  const url = await getConfig('formularios_url', FORMS_URL);
+  const url = await urlFormularios();
   main.innerHTML = `<h2>Solicitudes de cambio de cuenta</h2>
     <div class="toolbar"><select id="ce">${[['pendiente', 'Pendientes'], ['aplicado', 'Aplicadas'], ['rechazado', 'Rechazadas'], ['', 'Todas']].map(([k, l]) => `<option value="${k}" ${k === estado ? 'selected' : ''}>${l}</option>`).join('')}</select>
       <span class="sp"></span>${url ? `<input readonly value="${esc(url)}/cambio.html" style="width:340px" id="cUrl"><button class="btn" id="cCopy">Copiar liga del formulario</button>` : '<span class="muted">Configura la dirección de los formularios en Ajustes para obtener la liga.</span>'}</div>
