@@ -58,6 +58,65 @@
       `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
   }
 
+  /** Quita las copias "de respaldo" (mc:Fallback, formato viejo VML) de cuadros de texto y figuras:
+      Word usa la versión moderna y así no se duplica ni se rompe la imagen de la huella. */
+  function quitarFallbacks(xml) {
+    const re = /<mc:Fallback>(?:(?!<mc:Fallback>)[\s\S])*?<\/mc:Fallback>/;
+    let prev; do { prev = xml; xml = xml.replace(re, ''); } while (xml !== prev);
+    return xml;
+  }
+
+  /**
+   * Detecta en el machote dónde firma el socio y dónde va su huella, aunque no tenga [FIRMA]:
+   *  - una línea de firma (______) seguida de "C. [SOCIO]" o "[SOCIO]"
+   *  - un renglón "[SOCIO]" con "Firma" / "Huella" (ej. "[SOCIO] Nombre, Firma y Huella")
+   *  - el recuadro de "REGISTRO DE FIRMA"
+   * Ahí agrega [FIRMA] y/o [HUELLA] para que se llenen con las imágenes del cuestionario.
+   * No toca líneas de firma de otras personas (representante legal, testigos, "Recibí").
+   */
+  function marcarFirmas(xml, {firma = true, huella = true} = {}) {
+    const segs = []; const re = /<w:p[ >][\s\S]*?<\/w:p>/g; let m;
+    while ((m = re.exec(xml))) {
+      const texto = (m[0].match(/<w:t(?: [^>]*)?>[^<]*<\/w:t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join('');
+      segs.push({start: m.index, xml: m[0], texto, t: texto.replace(/\s+/g, ' ').trim()});
+    }
+    const ya = new Set(); const marcas = new Map();   // índice de párrafo -> [FIRMA]/[HUELLA]
+    const otraPersona = t => /HOIL|REPRESENTANTE|TESTIGO|RECIB[IÍ]|ADMINISTRADOR/i.test(t);
+    const tiene = (i, k) => (marcas.get(i) || '').includes(k) || /\[(FIRMA|HUELLA)[^\]]*\]/i.test(segs[i].t) && segs[i].t.toUpperCase().includes(k);
+    const poner = (i, k) => { if (!tiene(i, k)) marcas.set(i, (marcas.get(i) || '') + k); ya.add(i); };
+    const sig = (i, n = 3) => { const out = []; for (let j = i + 1; j < segs.length && out.length < n; j++) if (segs[j].t) out.push(j); return out; };
+    segs.forEach((s, i) => {
+      if (/\[(FIRMA|HUELLA)/i.test(s.t)) return;                                         // el machote ya dice dónde
+      // 1) línea de firma del socio
+      if (/^_{8,}\.?$/.test(s.t)) { const [j] = sig(i, 1); if (j !== undefined && /\[SOCIO\]/.test(segs[j].t) && !otraPersona(segs[j].t) && j - i <= 4) { if (firma) poner(i, '[FIRMA]'); } return; }
+      // 2) "[SOCIO] Nombre, Firma y Huella" en el mismo renglón o en el siguiente
+      if (/\[SOCIO\]/.test(s.t) && !otraPersona(s.t) && s.t.length < 90) {
+        const [j] = sig(i, 1); const pie = s.t + ' ' + (j !== undefined ? segs[j].t : '');
+        if (/firma/i.test(pie) && firma && !ya.has(i - 1)) poner(i, '[FIRMA]');
+        if (/huella/i.test(pie) && huella) poner(i, '[HUELLA]');
+      }
+      // 3) recuadro de registro de firma: primer renglón vacío después del título
+      if (/REGISTRO DE FIRMA/i.test(s.t) && firma) { for (let j = i + 1; j < Math.min(segs.length, i + 6); j++) if (!segs[j].t) { poner(j, '[FIRMA]'); break; } }
+    });
+    if (!marcas.size) return xml;
+    let out = '', last = 0;
+    segs.forEach((s, i) => {
+      if (!marcas.has(i)) return;
+      const run = marcas.get(i).split(/(?=\[)/).filter(Boolean).map(k => `<w:r><w:t xml:space="preserve">${k} </w:t></w:r>`).join('') + '<w:r><w:br/></w:r>';
+      const ppr = s.xml.match(/^<w:p(?: [^>]*)?>\s*(?:<w:pPr\/>|<w:pPr>(?:(?!<w:p[ >])[\s\S])*?<\/w:pPr>)/);
+      const corte = ppr ? ppr[0].length : s.xml.indexOf('>') + 1;
+      out += xml.slice(last, s.start) + s.xml.slice(0, corte) + run + s.xml.slice(corte); last = s.start + s.xml.length;
+    });
+    return out + xml.slice(last);
+  }
+
+  /** Lugares donde irían firma y huella (para mostrarlo en Ajustes). */
+  async function lugaresImagenes(template) {
+    const zip = await JSZip.loadAsync(template); const xml = quitarFallbacks(await zip.file('word/document.xml').async('string'));
+    const marcado = marcarFirmas(xml); const t = marcado.replace(/<[^>]+>/g, ' ');
+    return {firmas: (t.match(/\[FIRMA[^\]]*\]/gi) || []).length, huellas: (t.match(/\[HUELLA[^\]]*\]/gi) || []).length};
+  }
+
   /**
    * @param template ArrayBuffer/Uint8Array del machote
    * @param valores {'SOCIO': 'PEREZ ...', 'RFC': ...}
@@ -74,13 +133,18 @@
     }
     const files = Object.keys(zip.files).filter(f => /^word\/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$/.test(f));
     for (const f of files) {
-      const xml = await zip.file(f).async('string');
+      let xml = await zip.file(f).async('string');
+      if (f === 'word/document.xml' && imgs.length) {
+        xml = quitarFallbacks(xml);
+        xml = marcarFirmas(xml, {firma: !!imgMarks.FIRMA, huella: !!imgMarks.HUELLA});
+      }
       zip.file(f, fillXml(xml, valores, f === 'word/document.xml' ? imgMarks : null));
     }
     if (imgs.length) {
       let doc = await zip.file('word/document.xml').async('string');
       let rels = await zip.file('word/_rels/document.xml.rels').async('string');
       let ct = await zip.file('[Content_Types].xml').async('string');
+      let docPr = 0;   // cada imagen insertada lleva su propio id
       for (const {mark, img, n: i} of imgs) {
         const ext = img.ext === 'jpg' ? 'jpeg' : img.ext;
         const name = `facol_img${i}.${ext}`; const rid = `rIdFacol${i}`;
@@ -90,7 +154,7 @@
         const maxW = img.maxW || 1.6, ratio = (img.h && img.w) ? img.h / img.w : 1;
         const cx = Math.round(maxW * 914400), cy = Math.round(maxW * ratio * 914400);
         doc = doc.replace(new RegExp(`(<w:t[^>]*>)([^<]*)${mark}([^<]*)(</w:t>)`, 'g'),
-          (_, o, a, b, c) => `${o}${a}${c}</w:r><w:r>${drawingXml(rid, 9000 + i, cx, cy)}</w:r><w:r><w:t xml:space="preserve">${b}${c}`);
+          (_, o, a, b, c) => `${o}${a}${c}</w:r><w:r>${drawingXml(rid, 9000 + (++docPr), cx, cy)}</w:r><w:r><w:t xml:space="preserve">${b}${c}`);
       }
       if (!/xmlns:wp=/.test(doc)) doc = doc.replace('<w:document ', '<w:document xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ');
       zip.file('word/document.xml', doc); zip.file('word/_rels/document.xml.rels', rels); zip.file('[Content_Types].xml', ct);
@@ -109,5 +173,5 @@
     return [...set];
   }
 
-  return {llenar, campos, fillXml, IMG_KEYS};
+  return {llenar, campos, fillXml, IMG_KEYS, marcarFirmas, quitarFallbacks, lugaresImagenes};
 });
