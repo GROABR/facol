@@ -283,7 +283,6 @@
     {k: 'curp', l: 'CURP', req: 1, ph: 'CURP', up: 1, re: '^[A-Z]{4}\\d{6}[HM][A-Z]{5}[A-Z0-9]\\d$', err: 'La CURP debe tener 18 caracteres'},
     {k: 'celular', l: 'Número celular (10 dígitos)', t: 'tel', req: 1, ph: 'NUMERO CELULAR', re: '^\\d{10}$', err: 'Escribe 10 dígitos'},
     {k: 'correo', l: 'Correo electrónico', t: 'email', req: 1, ph: 'CORREO ELECTRONICO'},
-    {k: 'correo_asesor', l: 'Correo del asesor', t: 'email', ph: 'CORREO DEL ASESOR'},
     {sec: 'Domicilio'},
     {k: 'calle', l: 'Calle', req: 1, ph: 'CALLE', up: 1},
     {k: 'no_exterior', l: 'No. exterior', req: 1, ph: 'No. EXTERIOR', up: 1},
