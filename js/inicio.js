@@ -1,7 +1,7 @@
 /* ---------- FACOL: tablero (según el módulo elegido) ---------- */
 VIEWS.inicio = async main => {
-  const esCol = modulo === 'colorines';
-  const [todas, inv, cam] = await Promise.all([db.list('operaciones', {eq: {estado: 'abierta', modalidad: esCol ? 'colorines' : 'retorno'}, order: 'numero', desc: true}),
+  const esCol = esDisp(modulo);
+  const [todas, inv, cam] = await Promise.all([db.list('operaciones', {eq: {estado: 'abierta', modalidad: modulo}, order: 'numero', desc: true}),
     db.list('invitaciones', {eq: {estado: 'respondida'}, select: 'id'}), db.list('cambios_cuenta', {eq: {estado: 'pendiente'}, select: 'id'})]);
   const ops = todas;
   const disp = esCol && ops.length ? await db.list('dispersiones', {in: {operacion_id: ops.map(o => o.id)}, select: 'operacion_id,estado,monto'}) : [];
@@ -10,7 +10,7 @@ VIEWS.inicio = async main => {
   const sinRetorno = ops.filter(o => !o.retorno_entregado);
   const sinFactura = ops.filter(o => o.requiere_factura && o.factura_estado !== 'emitida');
   const vacio = esCol ? !(await cat('beneficiarios', true)).length : !(await cat('clientes', true)).length;
-  main.innerHTML = `<h2>${esCol ? 'Colorines' : 'Retornos'} · Tablero</h2>
+  main.innerHTML = `<h2>${nombreModulo(modulo)} · Tablero</h2>
     ${vacio ? `<div class="note info"><b>Para empezar:</b> ${esCol ? 'revisa <b>Datos y comisiones</b> (presiona Guardar en ambos) e importa tu <b>BD ALTAS</b> en Beneficiarios' : 'da de alta tus <b>Clientes</b> y <b>Empresas</b> con su reparto de comisiones'}.
       ${db.mode === 'demo' ? '<br>En modo demostración puedes <button class="link" id="seed">cargar el ejemplo del FACOL2354</button>.' : ''}</div>` : ''}
     ${esCol ? '<div class="toolbar"><button class="btn primary" id="nueva">+ Nueva dispersión</button></div>' : ''}
