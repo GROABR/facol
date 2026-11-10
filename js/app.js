@@ -125,45 +125,90 @@ const tag = (s, label) => `<span class="tag ${TAG[s] ?? ''}">${esc(label || Stri
 /* ===================== sesión y menú ===================== */
 let me = null, view = 'inicio', viewArg = null;
 const VIEWS = {};                      // cada módulo registra sus pantallas aquí
-/* Cada módulo (Colorines / Retornos) tiene su propio menú. */
-const MODULOS = {
-  colorines: {label: 'Colorines', nav: [
-    {sec: 'Operación'},
-    {id: 'inicio', label: 'Tablero'},
-    {id: 'colorines', label: 'Dispersiones'},
-    {id: 'comisiones', label: 'Reporte de comisiones'},
-    {sec: 'Personas'},
-    {id: 'beneficiarios', label: 'Beneficiarios (BD)'},
-    {id: 'contratos', label: 'Altas y contratos', badge: 'altas'},
-    {id: 'cambios', label: 'Cambios de cuenta', badge: 'cambios'},
-    {sec: 'Configuración'},
-    {id: 'esquemaColorines', label: 'Datos y comisiones'},
-    {id: 'comisionistas', label: 'Promotores'},
-    {id: 'ajustes', label: 'Ajustes'},
-  ]},
-  retorno: {label: 'Retornos', nav: [
-    {sec: 'Operación'},
-    {id: 'inicio', label: 'Tablero'},
-    {id: 'depositos', label: 'Depósitos y retornos'},
-    {id: 'comisiones', label: 'Reporte de comisiones'},
-    {sec: 'Configuración'},
-    {id: 'clientes', label: 'Clientes y comisiones'},
-    {id: 'comisionistas', label: 'Promotores'},
-    {id: 'empresas', label: 'Empresas'},
-    {id: 'ajustes', label: 'Ajustes'},
-  ]},
-};
+/* ---------- Módulos: un módulo por cliente que opera como Colorines (dispersión), más Retornos ---------- */
+const NAV_DISPERSION = [
+  {sec: 'Operación'},
+  {id: 'inicio', label: 'Tablero'},
+  {id: 'colorines', label: 'Dispersiones'},
+  {id: 'comisiones', label: 'Reporte de comisiones'},
+  {id: 'facturas', label: 'Facturas y complementos'},
+  {sec: 'Personas'},
+  {id: 'beneficiarios', label: 'Beneficiarios (BD)'},
+  {id: 'contratos', label: 'Altas y contratos', badge: 'altas'},
+  {id: 'cambios', label: 'Cambios de cuenta', badge: 'cambios'},
+  {sec: 'Configuración'},
+  {id: 'esquemaColorines', label: 'Datos y comisiones'},
+  {id: 'comisionistas', label: 'Promotores'},
+  {id: 'ajustes', label: 'Ajustes'},
+];
+const NAV_RETORNO = [
+  {sec: 'Operación'},
+  {id: 'inicio', label: 'Tablero'},
+  {id: 'depositos', label: 'Depósitos y retornos'},
+  {id: 'comisiones', label: 'Reporte de comisiones'},
+  {id: 'facturas', label: 'Facturas y complementos'},
+  {sec: 'Configuración'},
+  {id: 'clientes', label: 'Clientes y comisiones'},
+  {id: 'comisionistas', label: 'Promotores'},
+  {id: 'empresas', label: 'Empresas'},
+  {id: 'ajustes', label: 'Ajustes'},
+];
 // usuarios de solo consulta: ven contratos, la BD de beneficiarios, facturas y comprobantes
 const NAV_CONSULTA = [
   {sec: 'Consulta'},
   {id: 'consultaContratos', label: 'Contratos'},
   {id: 'consultaBeneficiarios', label: 'Beneficiarios (BD)'},
-  {id: 'consultaFacturas', label: 'Facturas'},
+  {id: 'facturas', label: 'Facturas y complementos'},
   {id: 'consultaComprobantes', label: 'Comprobantes de dispersión'},
 ];
 const esConsulta = () => me && me.rol === 'consulta';
-let modulo = (() => { try { return MODULOS[localStorage.getItem('facol-modulo')] ? localStorage.getItem('facol-modulo') : 'colorines'; } catch { return 'colorines'; } })();
+const esDisp = m => !!m && m !== 'retorno';                     // todo módulo que no es Retornos trabaja como Colorines
+let MODS = [{id: 'colorines', nombre: 'Colorines'}];             // se carga de la configuración "modulos"
+const nombreModulo = m => m === 'retorno' ? 'Retornos' : ((MODS.find(x => x.id === m) || {}).nombre || m || '');
+const cfgModulo = (m, k) => m === 'colorines' || !m ? `colorines_${k}` : `mod_${m}_${k}`;   // Colorines conserva sus claves de siempre
+async function cargarModulos() {
+  const extra = await getConfig('modulos', []).catch(() => []);
+  MODS = [{id: 'colorines', nombre: 'Colorines'}, ...(Array.isArray(extra) ? extra : []).filter(m => m && m.id && m.id !== 'colorines')];
+  if (modulo !== 'retorno' && !MODS.some(m => m.id === modulo)) modulo = 'colorines';
+}
+let modulo = (() => { try { return localStorage.getItem('facol-modulo') || 'colorines'; } catch { return 'colorines'; } })();
 function setModulo(m) { modulo = m; try { localStorage.setItem('facol-modulo', m); } catch { /* sin almacenamiento */ } go('inicio'); }
+
+/** Siguiente folio del módulo. Colorines usa el consecutivo de la base (FACOL…); cada cliente nuevo, el suyo. */
+async function siguienteFolio(mod) {
+  if (mod === 'colorines') return db.rpc('siguiente_folio');
+  const lista = await getConfig('modulos', []); const m = lista.find(x => x.id === mod); if (!m) throw new Error('Módulo no encontrado');
+  const ops = await db.list('operaciones', {eq: {modalidad: mod}, select: 'numero,folio'});
+  const todos = new Set((await db.list('operaciones', {select: 'folio'})).map(o => o.folio));
+  let n = Math.max(+m.siguiente || 1, ...ops.map(o => (+o.numero || 0) + 1));
+  while (todos.has(m.prefijo + n)) n++;
+  m.siguiente = n + 1; await setConfig('modulos', lista);
+  return {numero: n, folio: m.prefijo + n};
+}
+
+/** Alta de un cliente nuevo que opera como Colorines: crea su módulo con su propio folio, datos y comisiones. */
+function nuevoModulo() {
+  modal('Nuevo cliente (módulo)', `<p class="small muted" style="margin-top:0">Se crea un módulo igual a Colorines: sus propias dispersiones, folios, datos de facturación y reparto de comisiones. Beneficiarios, contratos y promotores se comparten.</p>
+    <div class="form"><label>Nombre del cliente</label><input id="nmN" placeholder="Ej. SAGVE">
+      <label>Prefijo del folio</label><input id="nmP" placeholder="Ej. FASAG"><label>Primer número</label><input id="nmS" type="number" value="1">
+      <label>Comisiones</label><select id="nmE"><option value="colorines">Copiar el reparto de Colorines</option><option value="">Empezar con el reparto de ejemplo</option></select></div>
+    <div class="err" id="nmErr"></div>`, [
+    {label: 'Cancelar'},
+    {label: 'Crear cliente', cls: 'primary', onClick: async () => {
+      const nombre = val('nmN').toUpperCase(), prefijo = val('nmP').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!nombre || !prefijo) { $('#nmErr').textContent = 'Escribe el nombre y el prefijo del folio'; return false; }
+      const id = Logica.normName(nombre).toLowerCase().replace(/\s+/g, '_').slice(0, 30) || 'cliente';
+      const lista = await getConfig('modulos', []);
+      if (id === 'colorines' || id === 'retorno' || lista.some(m => m.id === id)) { $('#nmErr').textContent = 'Ya existe un cliente con ese nombre'; return false; }
+      if (prefijo === String(await getConfig('folio_prefijo', 'FACOL')).toUpperCase() || lista.some(m => m.prefijo === prefijo)) { $('#nmErr').textContent = 'Ese prefijo ya lo usa otro cliente'; return false; }
+      lista.push({id, nombre, prefijo, siguiente: Math.max(1, Math.floor(num('nmS')) || 1)}); await setConfig('modulos', lista);
+      if (val('nmE') === 'colorines') await setConfig(cfgModulo(id, 'esquema'), await getConfig(cfgModulo('colorines', 'esquema'), null) || Logica.ESQUEMA_COLORINES);
+      await setConfig(cfgModulo(id, 'datos'), {cliente: nombre});
+      await cargarModulos(); modulo = id; try { localStorage.setItem('facol-modulo', id); } catch { /* */ }
+      toast(`Cliente ${nombre} creado: revisa sus datos y comisiones`); setTimeout(() => go('esquemaColorines'), 50);
+    }}]);
+}
+
 async function renderNav() {
   const badges = {};
   if (esConsulta()) {
@@ -174,11 +219,14 @@ async function renderNav() {
     const [a, c] = await Promise.all([db.list('invitaciones', {eq: {estado: 'respondida'}, select: 'id'}), db.list('cambios_cuenta', {eq: {estado: 'pendiente'}, select: 'id'})]);
     badges.altas = a.length; badges.cambios = c.length;
   } catch { /* sin conexión */ }
-  $('#nav').innerHTML = `<div class="mods">${Object.entries(MODULOS).map(([k, m]) => `<button data-m="${k}" class="${k === modulo ? 'on' : ''}">${m.label}</button>`).join('')}</div>` +
-    MODULOS[modulo].nav.map(n => n.sec ? `<div class="sec">${n.sec}</div>` :
+  $('#nav').innerHTML = `<div class="modsel"><label>Módulo</label><select id="modSel">
+      <optgroup label="Dispersión">${MODS.map(m => `<option value="${esc(m.id)}" ${m.id === modulo ? 'selected' : ''}>${esc(m.nombre)}</option>`).join('')}</optgroup>
+      <optgroup label="Otros"><option value="retorno" ${modulo === 'retorno' ? 'selected' : ''}>Retornos</option></optgroup>
+      <option value="__nuevo">+ Nuevo cliente…</option></select></div>` +
+    (esDisp(modulo) ? NAV_DISPERSION : NAV_RETORNO).map(n => n.sec ? `<div class="sec">${n.sec}</div>` :
     `<button data-v="${n.id}" class="${view === n.id ? 'on' : ''}">${esc(n.label)}${n.badge && badges[n.badge] ? `<span class="badge">${badges[n.badge]}</span>` : ''}</button>`).join('');
   $$('#nav button[data-v]').forEach(b => b.onclick = () => go(b.dataset.v));
-  $$('#nav button[data-m]').forEach(b => b.onclick = () => setModulo(b.dataset.m));
+  $('#modSel').onchange = e => { if (e.target.value === '__nuevo') { e.target.value = modulo; nuevoModulo(); } else setModulo(e.target.value); };
 }
 async function go(v, arg) {
   if (esConsulta() && !NAV_CONSULTA.some(n => n.id === v)) v = 'consultaContratos';   // consulta no entra a pantallas de captura
@@ -226,6 +274,7 @@ async function boot() {
   if (!s) return renderLogin();
   if (!(await db.isStaff().catch(() => false))) { await db.signOut(); return renderLogin('Tu usuario no tiene acceso. Pide que agreguen tu correo a la tabla staff.'); }
   me = s; me.rol = await db.rol().catch(() => 'operador');
+  await cargarModulos().catch(() => {});
   $('#login').style.display = 'none'; $('#side').style.display = 'flex';
   $('#me').innerHTML = `${db.mode === 'demo' ? '<span class="demo">DEMO</span><br>' : ''}${esc(me.email)}${esConsulta() ? '<br><span class="small">solo consulta</span>' : ''}<br><button id="out">Salir</button>`;
   $('#out').onclick = async () => { await db.signOut(); location.reload(); };
