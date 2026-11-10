@@ -1,7 +1,7 @@
 /* ---------- FACOL: cuestionario de alta (invitaciones), revisión de respuestas y contratos ---------- */
 VIEWS.contratos = async (main, arg) => {
   const tab = (arg && arg.tab) || 'respuestas';
-  const [inv, cons, url] = await Promise.all([db.list('invitaciones', {order: 'created_at', desc: true}), db.list('contratos', {order: 'created_at', desc: true}), getConfig('formularios_url', FORMS_URL)]);
+  const [inv, cons, url] = await Promise.all([db.list('invitaciones', {order: 'created_at', desc: true}), db.list('contratos', {order: 'created_at', desc: true}), urlFormularios()]);
   const bens = await cat('beneficiarios');
   const resp = inv.filter(i => i.estado === 'respondida');
   main.innerHTML = `<h2>Altas y contratos</h2>
@@ -12,16 +12,18 @@ VIEWS.contratos = async (main, arg) => {
   $('#cNew').onclick = () => nuevaInvitacion(url);
   $('#cMan').onclick = async () => { const b = await buscarBeneficiario('', bens); if (b) generarContrato(b); };
   const body = $('#cBody');
-  const lista = rows => `<div class="tablewrap"><table><thead><tr><th>Enviada</th><th>Para</th><th>Contacto</th><th>Asesor</th><th>Respondida</th><th>Estado</th><th></th></tr></thead><tbody>
+  const lista = rows => `<div class="tablewrap"><table><thead><tr><th>Enviada</th><th>Para</th><th>Contacto</th><th>Operación</th><th>Respondida</th><th>Estado</th><th></th></tr></thead><tbody>
     ${rows.map(i => `<tr data-id="${i.id}"><td>${fmtDate(i.created_at)}</td><td><b>${esc(i.respuesta ? Logica.valoresContrato(i.respuesta).SOCIO : i.nombre || '')}</b></td><td>${esc(i.correo || '')}<div class="small muted">${esc(i.celular || '')}</div></td>
       <td>${esc(i.asesor || '')}</td><td>${i.respondida_at ? fmtDate(i.respondida_at) : '—'}</td><td>${tag(i.estado)}</td>
-      <td style="white-space:nowrap">${i.estado === 'enviada' ? `<button class="link" data-link="${i.id}">Liga</button> · <button class="link" data-can="${i.id}" style="color:var(--bad)">Cancelar</button>` : ''}${i.respuesta ? `<button class="link" data-rev="${i.id}">${i.estado === 'respondida' ? 'Revisar' : 'Ver'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">Nada por aquí</td></tr>'}</tbody></table></div>`;
+      <td style="white-space:nowrap">${i.estado === 'enviada' ? `<button class="link" data-mail="${i.id}">Enviar por correo</button> · <button class="link" data-link="${i.id}">Liga</button> · <button class="link" data-can="${i.id}" style="color:var(--bad)">Cancelar</button>` : ''}${i.respuesta ? `<button class="link" data-rev="${i.id}">${i.estado === 'respondida' ? 'Revisar' : 'Ver'}</button>` : ''} · <button class="link" data-borra="${i.id}" style="color:var(--bad)">Borrar</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">Nada por aquí</td></tr>'}</tbody></table></div>`;
   if (tab === 'respuestas') body.innerHTML = lista(resp);
   if (tab === 'invitaciones') body.innerHTML = lista(inv);
   if (tab === 'contratos') tabContratos(body, cons, bens, arg || {});
   $$('[data-link]').forEach(b => b.onclick = () => mostrarLiga(inv.find(i => i.id === b.dataset.link), url));
   $$('[data-can]').forEach(b => b.onclick = async () => { if (await confirmar('Cancelar invitación', 'La liga dejará de funcionar.', 'Cancelar invitación', 'bad')) { await db.update('invitaciones', b.dataset.can, {estado: 'cancelada'}); refresh(); } });
   $$('[data-rev]').forEach(b => b.onclick = () => revisarAlta(inv.find(i => i.id === b.dataset.rev)));
+  $$('[data-mail]').forEach(b => b.onclick = () => pedirCorreoYEnviar(inv.find(i => i.id === b.dataset.mail), url));
+  $$('[data-borra]').forEach(b => b.onclick = () => borrarInvitacion(inv.find(i => i.id === b.dataset.borra)));
 };
 
 /* ===================== lista de contratos: buscador, orden y carga de contratos existentes ===================== */
@@ -100,19 +102,70 @@ async function subirContratos(files) {
   reabrir();
 }
 
+/* ----- envío del cuestionario por correo ----- */
+const linkAlta = (i, url) => `${url}/alta.html?t=${i.token}`;
+function correoAlta(i, url) {
+  const nombre = String(i.nombre || '').trim();
+  const link = linkAlta(i, url);
+  return {to: i.correo, subject: 'GROA · Completa tu registro de alta',
+    html: `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;color:#1d2733;max-width:560px">
+      <p>Hola${nombre ? ' ' + esc(nombre) : ''}:</p>
+      <p>Para darte de alta y preparar tu contrato, necesitamos que llenes el siguiente cuestionario con tus datos tal como aparecen en tu INE.
+      Al final te pediremos tu firma, una foto de tu huella, de tu nombre escrito a mano y de tu INE (por ambos lados).</p>
+      <p style="margin:26px 0"><a href="${link}" style="background:#1f5fbf;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Llenar cuestionario</a></p>
+      <p style="font-size:13px;color:#6b7785">Si el botón no abre, copia esta liga en tu navegador:<br>${link}</p>
+      <p style="font-size:13px;color:#6b7785">La liga es personal; no la compartas. Cualquier duda, responde a este correo.</p>
+      <p>Saludos,<br><b>GROA</b></p></div>`};
+}
+/** Envía el correo con Outlook (app de escritorio). Si no se puede, abre el correo ya redactado. */
+async function enviarCorreoAlta(i, url) {
+  if (!i.correo) throw new Error('Falta el correo de la persona');
+  const msg = correoAlta(i, url);
+  if (window.desk && desk.enviarCorreo) { const r = await desk.enviarCorreo(msg); if (r && r.ok) return 'enviado'; }
+  const texto = `Hola, para darte de alta y preparar tu contrato llena este cuestionario con tus datos: ${linkAlta(i, url)}`;
+  window.open(`mailto:${encodeURIComponent(i.correo)}?subject=${encodeURIComponent(msg.subject)}&body=${encodeURIComponent(texto)}`);
+  return 'redactado';
+}
+const avisoEnvio = (r, n = 1) => toast(r === 'enviado' ? `Cuestionario enviado por correo${n > 1 ? ` a ${n} personas` : ''}` : 'Se abrió tu correo con el mensaje listo: solo presiona Enviar');
+
 function nuevaInvitacion(url) {
-  modal('Enviar cuestionario de alta', `<div class="form"><label>Nombre</label><input id="iN" placeholder="Para identificarla"><label>Correo</label><input id="iC" type="email"><label>Celular</label><input id="iT" placeholder="10 dígitos"><label>Asesor</label><input id="iA"></div>
-    <p class="small muted">Se genera una liga única para esta persona. Tú la envías por WhatsApp o correo; cuando la llene, aparecerá en "Por revisar".</p>`, [
-    {label: 'Cancelar'}, {label: 'Crear liga', cls: 'primary', onClick: async () => {
-      const i = await db.insert('invitaciones', {nombre: val('iN').toUpperCase(), correo: val('iC'), celular: val('iT').replace(/\D/g, ''), asesor: val('iA')});
+  modal('Enviar cuestionario de alta', `<div class="form"><label>Nombre</label><input id="iN" placeholder="Nombre de la persona"><label>Correo</label><input id="iC" type="email" placeholder="a donde se envía"><label>Celular (opcional)</label><input id="iT" placeholder="10 dígitos"></div>
+    <p class="small muted">Se le envía por correo una liga personal para llenar el cuestionario. Cuando lo conteste aparecerá en "Por revisar".</p><div class="err" id="iErr"></div>`, [
+    {label: 'Cancelar'},
+    {label: 'Solo crear liga', onClick: async () => {
+      const i = await db.insert('invitaciones', {nombre: val('iN').toUpperCase(), correo: val('iC').toLowerCase(), celular: val('iT').replace(/\D/g, '')});
       setTimeout(() => mostrarLiga(i, url), 50);
+    }},
+    {label: 'Enviar por correo', cls: 'primary', onClick: async () => {
+      const correo = val('iC').toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) { $('#iErr').textContent = 'Escribe un correo válido'; return false; }
+      const i = await db.insert('invitaciones', {nombre: val('iN').toUpperCase(), correo, celular: val('iT').replace(/\D/g, '')});
+      avisoEnvio(await enviarCorreoAlta(i, url)); refresh();
     }}]);
+}
+/** Pide (o confirma) el correo de una invitación ya creada y la envía. */
+function pedirCorreoYEnviar(i, url) {
+  modal(`Enviar cuestionario a ${i.nombre || ''}`, `<div class="form"><label>Correo</label><input id="pcC" type="email" value="${esc(i.correo || '')}"></div><div class="err" id="pcE"></div>`, [
+    {label: 'Cancelar'},
+    {label: 'Enviar por correo', cls: 'primary', onClick: async () => {
+      const correo = val('pcC').toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) { $('#pcE').textContent = 'Escribe un correo válido'; return false; }
+      if (correo !== i.correo) { await db.update('invitaciones', i.id, {correo}); i.correo = correo; }
+      avisoEnvio(await enviarCorreoAlta(i, url)); refresh();
+    }}]);
+}
+async function borrarInvitacion(i) {
+  const nombre = i.respuesta ? Logica.valoresContrato(i.respuesta).SOCIO : i.nombre || i.correo || '';
+  if (!(await confirmar('Borrar invitación', `¿Borrar la invitación de <b>${esc(nombre)}</b>${i.respuesta ? ' y sus respuestas' : ''}? La liga deja de funcionar.${i.beneficiario_id ? '<br><span class="small muted">La persona sigue en Beneficiarios; para quitarla bórrala desde ahí.</span>' : ''}`, 'Borrar', 'bad'))) return;
+  await guard(async () => {
+    for (const p of Object.values((i.respuesta || {})._archivos || {})) if (p && !String(p).startsWith('data:')) await db.removeFile(p).catch(() => {});
+    await db.remove('invitaciones', i.id);
+  }, 'Invitación borrada'); refresh();
 }
 function mostrarLiga(i, url) {
   const link = `${url || '[configura la dirección en Ajustes]'}/alta.html?t=${i.token}`;
   const msg = `Hola${i.nombre ? ' ' + i.nombre.split(' ')[0] : ''}, por favor llena este cuestionario para tu alta: ${link}`;
   modal('Liga del cuestionario', `<p>Liga para <b>${esc(i.nombre || i.correo || '')}</b>:</p><input readonly id="lk" style="width:100%" value="${esc(link)}">
     <p class="small muted">La liga solo sirve para una persona y deja de funcionar al aprobar su alta o si la cancelas.</p>`, [
+    {label: 'Enviar por correo', onClick: () => { setTimeout(() => pedirCorreoYEnviar(i, url), 50); }},
     ...(i.celular ? [{label: 'Abrir WhatsApp', onClick: () => { window.open(`https://wa.me/52${i.celular}?text=${encodeURIComponent(msg)}`); return false; }}] : []),
     {label: 'Copiar mensaje', onClick: () => { navigator.clipboard.writeText(msg); toast('Mensaje copiado'); return false; }},
     {label: 'Copiar liga', cls: 'primary', onClick: () => { navigator.clipboard.writeText(link); toast('Liga copiada'); refresh(); }}]);
@@ -176,16 +229,20 @@ async function generarContrato(b, inv) {
   if (!d.apellido_paterno && !d.nombres) vals0.SOCIO = b.nombre;
   const imgCampos = campos.filter(c => Docx.IMG_KEYS.includes(c.toUpperCase()));
   const txt = campos.filter(c => !imgCampos.includes(c));
+  const arch = d._archivos || {}; const lugares = await Docx.lugaresImagenes(tpl).catch(() => ({firmas: 0, huellas: 0}));
   modal('Generar contrato: ' + (vals0.SOCIO || b.nombre), `<p class="small muted" style="margin-top:0">Revisa o completa los campos del machote. Lo que cambies aquí solo afecta este contrato.</p>
     <div class="form">${txt.map(c => `<label>[${esc(c)}]</label>` + (c === 'FECHA INICIO' ? `<input type="date" data-c="${esc(c)}" value="${today()}">` : `<input data-c="${esc(c)}" value="${esc(vals0[c] ?? '')}" class="${vals0[c] ? '' : 'bad'}">`)).join('')}</div>
-    ${imgCampos.length ? `<p class="small">${imgCampos.map(c => `[${esc(c)}] ${(d._archivos || {})[c.toLowerCase().startsWith('huella') ? 'huella' : c.toLowerCase().startsWith('firma') ? 'firma' : 'nombre_mano'] ? tag('ok', 'se inserta la imagen del cuestionario') : tag('warn', 'sin imagen, queda en blanco')}`).join('<br>')}</p>` : ''}`, [
+    <p class="small">Firma: ${arch.firma ? tag('ok', `se pone en ${lugares.firmas} lugar(es) del machote`) : tag('warn', 'no hay firma del cuestionario')}
+      · Huella: ${arch.huella ? tag('ok', `se pone en ${lugares.huellas} lugar(es)`) : tag('warn', 'no hay huella del cuestionario')}</p>`, [
     {label: 'Cancelar'}, {label: 'Generar .docx', cls: 'primary', onClick: async () => {
       const vals = {...vals0}; $$('#dlg [data-c]').forEach(i => vals[i.dataset.c] = i.type === 'date' ? fmtDay(i.value) : i.value.trim());
       const fechaIni = $('#dlg [data-c="FECHA INICIO"]') ? $('#dlg [data-c="FECHA INICIO"]').value : today();
       if (campos.includes('EDAD') && d.fecha_nacimiento) vals.EDAD = String(Logica.edad(d.fecha_nacimiento, new Date(fechaIni + 'T12:00:00')));
-      const a = d._archivos || {}; const imagenes = {};
-      for (const c of imgCampos) { const key = c.toUpperCase().startsWith('HUELLA') ? 'huella' : c.toUpperCase().startsWith('FIRMA') ? 'firma' : 'nombre_mano';
-        const im = await imagenDe(a[key]); if (im) imagenes[c.toUpperCase()] = {...im, maxW: key === 'huella' ? 1.1 : 2.2}; }
+      // firma y huella siempre (el machote detecta dónde van); "nombre escrito a mano" solo si el machote lo pide
+      const imagenes = {};
+      const firma = await imagenDe(arch.firma); if (firma) imagenes.FIRMA = {...firma, maxW: 1.7};
+      const huella = await imagenDe(arch.huella); if (huella) imagenes.HUELLA = {...huella, maxW: 0.85};
+      if (imgCampos.some(c => /NOMBRE/i.test(c))) { const nm = await imagenDe(arch.nombre_mano); if (nm) for (const c of imgCampos.filter(c => /NOMBRE/i.test(c))) imagenes[c.toUpperCase()] = {...nm, maxW: 2}; }
       const out = await Docx.llenar(tpl, vals, imagenes);
       const nombre = `${vals.SOCIO || b.nombre}.docx`;
       const path = `beneficiarios/${b.id}/contrato/${Date.now()}_${safePath(nombre)}`;
