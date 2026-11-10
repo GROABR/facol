@@ -49,10 +49,10 @@ const rowDispersion = (l, opId, i) => ({operacion_id: opId, nombre_archivo: l.no
 
 /* ===================== Nueva dispersión ===================== */
 VIEWS.colorinesNueva = async main => {
-  const [bens, esq, dc] = await Promise.all([cat('beneficiarios', true), esquemaColorines(), datosColorines()]);
+  const [bens, esq, dc] = await Promise.all([cat('beneficiarios', true), esquemaColorines(modulo), datosColorines(modulo)]);
   const st = {fichas: [], solicitud: null, items: null, rev: null, lines: [], res: null, info: {}};
-  main.innerHTML = `<h2><button class="link back" id="bk">← Colorines</button></h2>
-    <h2>Nueva dispersión Colorines</h2>
+  main.innerHTML = `<h2><button class="link back" id="bk">← ${esc(nombreModulo(modulo))}</button></h2>
+    <h2>Nueva dispersión ${esc(nombreModulo(modulo))}</h2>
     <div class="cols">
       <div class="panel"><h3 style="margin-top:0">1. Ficha de pago</h3>
         <p class="small muted" style="margin-top:0">Cliente: <b>${esc(dc.cliente)}</b> · factura ${esc(dc.empresa_factura || '—')} <button class="link" id="nDat">cambiar datos</button></p>
@@ -67,7 +67,7 @@ VIEWS.colorinesNueva = async main => {
         <h3>3. Resultado</h3><div id="nRes" class="muted">Sube la solicitud para calcular.</div></div>
     </div>
     <h3>Colaboradores</h3><div id="nRev" class="empty">Aquí aparece la lista al subir la solicitud.</div>
-    <h3>Comisiones de la operación <span class="small muted" style="font-weight:400">(esquema Colorines: Casa, Abel y terciarias)</span></h3><div id="nCom" class="muted">Sube la solicitud para calcular las comisiones.</div>
+    <h3>Comisiones de la operación <span class="small muted" style="font-weight:400">(esquema del módulo: Casa y promotores)</span></h3><div id="nCom" class="muted">Sube la solicitud para calcular las comisiones.</div>
     <div class="toolbar" style="margin-top:14px"><span class="sp"></span><span class="err" id="nErr"></span><button class="btn primary" id="nGo">Guardar, asignar folio y generar Excel FACOL</button></div>`;
   $('#bk').onclick = () => go('colorines');
   const pctNow = () => num('nPct') || 0; const depNow = () => num('nMon');
@@ -84,13 +84,12 @@ VIEWS.colorinesNueva = async main => {
     const base = res ? res.total : depNow();
     if (res && base) {
       const ls = Logica.ajustarCuadre(Logica.calcComisiones(base, esquemaAhora()), res.comision);
-      const casa = ls.find(l => l.clase === 'casa');
-      $('#nCom').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Concepto</th><th class="n">%</th><th class="n">Comisión</th></tr></thead><tbody>
-        <tr><td><b>CASA</b></td><td class="n">${pct(casa.pct)}</td><td class="n">${money(casa.monto)}</td></tr>
-        ${ls.filter(l => l.base_linea_id).map(x => `<tr class="sub"><td>↳ <b>${esc(x.nombre)}</b> (sale de la Casa)</td><td class="n">${pct(x.pct)} de Casa</td><td class="n">${money(x.monto)}</td></tr>`).join('')}
-        <tr class="sub"><td>↳ Casa neto</td><td></td><td class="n">${money(Logica.netoLinea(casa, ls))}</td></tr>
-        ${ls.filter(l => l.clase === 'terciaria').map(l => `<tr><td>${esc(l.nombre)} <span class="tag">terciaria</span></td><td class="n">${pct(l.pct)}</td><td class="n">${money(l.monto)}</td></tr>`).join('')}
-        </tbody><tfoot><tr><td>Total comisión</td><td></td><td class="n">${money(Logica.totalesComision(ls).total)}</td></tr></tfoot></table></div>`;
+      const hijos = p => ls.filter(x => x.base_linea_id === p.id);
+      $('#nCom').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Concepto</th><th class="n">%</th><th>Forma de pago</th><th class="n">Comisión</th></tr></thead><tbody>
+        ${ls.filter(l => !l.base_linea_id).map(l => `<tr><td><b>${esc(l.nombre)}</b></td><td class="n">${pct(l.pct)}</td><td>${esc(l.tipo_pago || '')}</td><td class="n">${money(l.monto)}</td></tr>` +
+          hijos(l).map(x => `<tr class="sub"><td>↳ <b>${esc(x.nombre)}</b> (sale de ${esc(l.nombre)})</td><td class="n">${pct(x.pct)} de ${esc(l.nombre)}</td><td>${esc(x.tipo_pago || '')}</td><td class="n">${money(x.monto)}</td></tr>`).join('') +
+          (hijos(l).length ? `<tr class="sub"><td>↳ ${esc(l.nombre)} neto</td><td></td><td></td><td class="n">${money(Logica.netoLinea(l, ls))}</td></tr>` : '')).join('')}
+        </tbody><tfoot><tr><td>Total comisión</td><td></td><td></td><td class="n">${money(Logica.totalesComision(ls).total)}</td></tr></tfoot></table></div>`;
     }
   };
   $('#nDat').onclick = () => go('esquemaColorines');
@@ -120,14 +119,14 @@ VIEWS.colorinesNueva = async main => {
     if (avisos.length && !(await confirmar('Antes de guardar', `<div class="note">${avisos.map(esc).join('<br>')}</div>¿Guardar de todos modos?`, 'Guardar'))) return;
     const b = $('#nGo'); busy(b, 'Guardando…');
     try {
-      const {folio, numero} = await db.rpc('siguiente_folio');
+      const {folio, numero} = await siguienteFolio(modulo);
       const fac = dc.requiere_factura !== false;
-      const op = await db.insert('operaciones', {folio, numero, modalidad: 'colorines', cliente_id: null, cliente_nombre: dc.cliente, razon_social: dc.razon_social || dc.cliente,
+      const op = await db.insert('operaciones', {folio, numero, modalidad: modulo, cliente_id: null, cliente_nombre: dc.cliente, razon_social: dc.razon_social || dc.cliente,
         fecha_deposito: val('nFec') || today(), fecha_solicitud: today(), fecha_compromiso: val('nFec') || today(), monto_deposito: dep, pct_comision: pctNow(),
         monto_comision: res.comision, monto_retorno: res.monto, banco_ordenante: val('nBO'), cuenta_ordenante: dc.cuenta_ordenante || '', empresa_factura: dc.empresa_factura || '',
         banco_receptor: dc.banco_receptor || '', cuenta_receptora: dc.cuenta_receptora || '', solicitante: val('nSol'), autorizado_por: dc.autorizado_por || '',
         tipo_retorno: 'TRANSFERENCIA', requiere_factura: fac, factura_estado: fac ? 'pendiente' : 'no_aplica'});
-      await copiarEsquemaColorines(op.id, res.total, res.comision);
+      await copiarEsquemaColorines(op.id, res.total, res.comision, modulo);
       await db.insert('dispersiones', ls.map((l, i) => rowDispersion(l, op.id, i)));
       for (const f of st.fichas) await subirArchivo(f, {operacion_id: op.id, tipo: 'ficha_deposito'});
       await subirArchivo(st.solicitud, {operacion_id: op.id, tipo: 'solicitud'});
@@ -159,9 +158,26 @@ async function cargarListaEnOperacion(el, op) {
 }
 
 /** Genera el Excel FACOL de la operación (cálculo de comisiones, SSP, prenómina y formato de dispersión). */
+/** Pregunta en cuántas facturas se divide el depósito (recuerda la última respuesta de cada operación). */
+function preguntarFacturas(op) {
+  const key = 'facol-nfact-' + op.id; let prev = 1; try { prev = +localStorage.getItem(key) || 1; } catch { /* sin almacenamiento */ }
+  return new Promise(res => {
+    let r = null;
+    modal(`Solicitud de factura · ${op.folio}`, `<p style="margin-top:0">El Excel lleva una hoja oculta con la solicitud de factura del depósito (${money(op.monto_deposito)}).</p>
+      <div class="form"><label>¿En cuántas facturas se divide?</label><input id="nfN" type="number" min="1" step="1" value="${prev}"></div><div id="nfV" class="small muted" style="margin-top:8px"></div>`, [
+      {label: 'Cancelar', onClick: () => res(null)},
+      {label: 'Generar Excel', cls: 'primary', onClick: () => { const n = Math.max(1, Math.floor(num('nfN')) || 1); try { localStorage.setItem(key, n); } catch { /* */ } r = n; res(n); }}]);
+    const ver = () => { const n = Math.max(1, Math.floor(num('nfN')) || 1); const t = r2(op.monto_deposito / n);
+      $('#nfV').textContent = `${n} factura(s) de aprox. ${money(t)} (subtotal ${money(r2(t / 1.16))} + IVA ${money(r2(t - t / 1.16))})`; };
+    $('#nfN').oninput = ver; ver(); $('#nfN').focus();
+    dlg.onclose = () => res(r);
+  });
+}
 async function excelFacol(op) {
+  let factura = null;
+  if (op.requiere_factura !== false) { const n = await preguntarFacturas(op); if (!n) return null; factura = {n, datos: await datosColorines(op.modalidad)}; }
   const [lineas, comisiones, coms] = await Promise.all([db.list('dispersiones', {eq: {operacion_id: op.id}, order: 'orden'}), db.list('operacion_comisiones', {eq: {operacion_id: op.id}, order: 'orden'}), cat('comisionistas')]);
-  const bytes = await FacolExcel.generar(ExcelJS, {op, lineas, comisiones, coms});
+  const bytes = await FacolExcel.generar(ExcelJS, {op, lineas, comisiones, coms, factura});
   return guardarBytes(bytes, `${op.folio}.xlsx`);
 }
 
