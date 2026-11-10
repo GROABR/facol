@@ -246,7 +246,7 @@ async function go(v, arg) {
 }
 const refresh = () => go(view, viewArg);
 
-function loginBox(inner) { const L = $('#login'); L.style.display = 'flex'; L.innerHTML = `<div class="box"><h1>GROA</h1>${inner}</div>`; }
+function loginBox(inner) { const L = $('#login'); L.style.display = 'flex'; L.innerHTML = `<div class="box"><img src="img/logo.jpg" alt="GROA Bienes Raíces" class="login-logo">${inner}</div>`; }
 function renderConexion(msg = '') {
   const c = dbConn.get() || {};
   loginBox(`<p class="muted" style="margin-top:0">Conecta la app con tu proyecto de Supabase (Project Settings → API).</p>
