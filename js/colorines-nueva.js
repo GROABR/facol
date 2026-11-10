@@ -194,7 +194,7 @@ async function tabAltas(el, op, disp) {
   const [inv, bens] = await Promise.all([db.list('invitaciones', {neq: {estado: 'cancelada'}, order: 'created_at', desc: true}), cat('beneficiarios', true)]);
   const benIds = [...new Set(disp.map(d => d.beneficiario_id).filter(Boolean))];
   const cons = benIds.length ? await db.list('contratos', {in: {beneficiario_id: benIds}, order: 'created_at', desc: true}) : [];
-  const url = await getConfig('formularios_url', FORMS_URL);
+  const url = await urlFormularios();
   const key = s => Logica.tokens(s).sort().join(' ');
   const invDe = d => inv.find(i => (d.beneficiario_id && i.beneficiario_id === d.beneficiario_id) || key(i.nombre) === key(d.nombre_archivo) ||
     (i.respuesta && Logica.nameScore(Logica.valoresContrato(i.respuesta).SOCIO, d.nombre_archivo) >= 0.86));
@@ -204,7 +204,7 @@ async function tabAltas(el, op, disp) {
     if (c) { estado = tag('ok', 'contrato generado ' + fmtDay(c.fecha_inicio)); accion = `<button class="link" data-dl="${c.id}">Descargar</button> · <button class="link" data-gen="${d.id}">Generar otro</button>`; }
     else if (i && i.estado === 'respondida') { estado = tag('warn', 'encuesta contestada'); accion = `<button class="btn sm primary" data-rev="${i.id}">Revisar y generar contrato</button>`; }
     else if (b && (i && ['aprobada', 'contrato'].includes(i.estado) || Object.keys(b.datos || {}).length)) { estado = tag('info', 'datos completos'); accion = `<button class="btn sm primary" data-gen="${d.id}">Generar contrato</button>`; }
-    else if (i && i.estado === 'enviada') { estado = tag('info', 'encuesta enviada ' + fmtDay(i.created_at)); accion = `<button class="link" data-link="${i.id}">Ver liga</button>`; }
+    else if (i && i.estado === 'enviada') { estado = tag('info', 'encuesta enviada ' + fmtDay(i.created_at)); accion = `<button class="link" data-mail="${i.id}">Reenviar correo</button> · <button class="link" data-link="${i.id}">Ver liga</button>`; }
     else { estado = b ? tag('', 'sin encuesta') : tag('bad', 'no está en la BD'); accion = `<button class="btn sm" data-env="${d.id}">Enviar encuesta</button>`; }
     return {d, b, i, estado, accion, falta: !c && !(i && ['enviada', 'respondida'].includes(i.estado)) && !(b && Object.keys(b.datos || {}).length)};
   });
@@ -216,15 +216,25 @@ async function tabAltas(el, op, disp) {
     ${filas.map((f, n) => `<tr><td>${n + 1}</td><td><b>${esc(f.d.nombre_archivo)}</b></td><td>${f.b ? esc(f.b.nombre) : '—'}</td><td>${f.estado}</td><td style="white-space:nowrap">${f.accion}</td></tr>`).join('')}
     </tbody></table></div>`;
   $('#aRef').onclick = refresh;
-  const crear = d => db.insert('invitaciones', {nombre: String(d.nombre || d.nombre_archivo).toUpperCase(), beneficiario_id: d.beneficiario_id || null, asesor: op.folio});
-  $$('[data-env]', el).forEach(b => b.onclick = () => guard(async () => { const i = await crear(disp.find(d => d.id === b.dataset.env)); mostrarLiga(i, url); }));
+  const correoDe = d => { const b = bens.find(x => x.id === d.beneficiario_id); return (b && b.correo) || ''; };
+  const crear = (d, correo) => db.insert('invitaciones', {nombre: String(d.nombre || d.nombre_archivo).toUpperCase(), correo: correo || correoDe(d) || null, beneficiario_id: d.beneficiario_id || null, asesor: op.folio});
+  $$('[data-env]', el).forEach(b => b.onclick = () => guard(async () => { const i = await crear(disp.find(d => d.id === b.dataset.env)); pedirCorreoYEnviar(i, url); }));
+  $$('[data-mail]', el).forEach(b => b.onclick = () => pedirCorreoYEnviar(inv.find(i => i.id === b.dataset.mail), url));
   $$('[data-link]', el).forEach(b => b.onclick = () => mostrarLiga(inv.find(i => i.id === b.dataset.link), url));
   $$('[data-rev]', el).forEach(b => b.onclick = () => revisarAlta(inv.find(i => i.id === b.dataset.rev)));
   $$('[data-gen]', el).forEach(b => b.onclick = () => { const f = filas.find(x => x.d.id === b.dataset.gen); if (!f.b) return toast('Primero debe estar en la BD'); generarContrato(f.b, f.i && f.i.beneficiario_id === f.b.id ? f.i : null); });
   $$('[data-dl]', el).forEach(b => b.onclick = () => { const c = cons.find(x => x.id === b.dataset.dl); const bn = bens.find(x => x.id === c.beneficiario_id); guard(() => descargarArchivo(c.path, `${bn ? bn.nombre : 'CONTRATO'}.docx`)); });
-  if ($('#aAll')) $('#aAll').onclick = () => guard(async () => {
-    const out = []; for (const f of faltan) { const i = await crear(f.d); out.push(`${i.nombre}: ${url || '[dirección de formularios]'}/alta.html?t=${i.token}`); }
-    modal(`Ligas de encuesta (${out.length})`, `<p class="small muted" style="margin-top:0">Cada liga es personal. Cópialas y mándalas a cada colaborador.</p><textarea id="ligas" rows="12" style="width:100%" readonly>${esc(out.join('\n'))}</textarea>`,
-      [{label: 'Copiar todas', cls: 'primary', onClick: () => { navigator.clipboard.writeText($('#ligas').value); toast('Ligas copiadas'); refresh(); }}]);
-  });
+  if ($('#aAll')) $('#aAll').onclick = () => {
+    modal(`Enviar encuesta por correo (${faltan.length})`, `<p class="small muted" style="margin-top:0">Revisa el correo de cada colaborador. A quien no tenga correo no se le envía.</p>
+      <div class="tablewrap" style="max-height:50vh"><table><thead><tr><th>Colaborador</th><th>Correo</th></tr></thead><tbody>${faltan.map((f, n) => `<tr><td>${esc(f.d.nombre || f.d.nombre_archivo)}</td><td><input type="email" data-n="${n}" value="${esc(correoDe(f.d))}" style="width:260px"></td></tr>`).join('')}</tbody></table></div>`, [
+      {label: 'Cancelar'},
+      {label: 'Enviar correos', cls: 'primary', onClick: async () => {
+        let env = 0, red = 0, sin = 0;
+        for (const inp of $$('#dlg [data-n]')) {
+          const c = inp.value.trim().toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c)) { sin++; continue; }
+          const i = await crear(faltan[+inp.dataset.n].d, c); (await enviarCorreoAlta(i, url)) === 'enviado' ? env++ : red++;
+        }
+        toast(`Enviados: ${env}${red ? ` · por enviar desde tu correo: ${red}` : ''}${sin ? ` · sin correo: ${sin}` : ''}`); refresh();
+      }}], {width: '640px'});
+  };
 }
