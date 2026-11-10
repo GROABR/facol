@@ -107,7 +107,8 @@ const linkAlta = (i, url) => `${url}/alta.html?t=${i.token}`;
 function correoAlta(i, url) {
   const nombre = String(i.nombre || '').trim();
   const link = linkAlta(i, url);
-  return {to: i.correo, subject: 'GROA · Completa tu registro de alta',
+  const firma = esDisp(modulo) ? nombreModulo(modulo) : 'Colorines';   // firma del correo: el cliente del módulo (Colorines)
+  return {to: i.correo, subject: `${firma} · Completa tu registro de alta`,
     html: `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;color:#1d2733;max-width:560px">
       <p>Hola${nombre ? ' ' + esc(nombre) : ''}:</p>
       <p>Para darte de alta y preparar tu contrato, necesitamos que llenes el siguiente cuestionario con tus datos tal como aparecen en tu INE.
@@ -115,7 +116,7 @@ function correoAlta(i, url) {
       <p style="margin:26px 0"><a href="${link}" style="background:#1f5fbf;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Llenar cuestionario</a></p>
       <p style="font-size:13px;color:#6b7785">Si el botón no abre, copia esta liga en tu navegador:<br>${link}</p>
       <p style="font-size:13px;color:#6b7785">La liga es personal; no la compartas. Cualquier duda, responde a este correo.</p>
-      <p>Saludos,<br><b>GROA</b></p></div>`};
+      <p>Saludos,<br><b>${esc(firma)}</b></p></div>`};
 }
 /** Envía el correo con Outlook (app de escritorio). Si no se puede, abre el correo ya redactado. */
 async function enviarCorreoAlta(i, url) {
