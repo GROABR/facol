@@ -264,7 +264,7 @@ function editarSimple(table, r) {
 
 /* ===================== Ajustes ===================== */
 VIEWS.ajustes = async main => {
-  const [sig, pre, formUrl] = await Promise.all([getConfig('folio_siguiente', 2355), getConfig('folio_prefijo', 'FACOL'), getConfig('formularios_url', FORMS_URL)]);
+  const [sig, pre, formUrl] = await Promise.all([getConfig('folio_siguiente', 2355), getConfig('folio_prefijo', 'FACOL'), urlFormularios()]);
   const hayMachote = await db.exists('plantillas/contrato.docx').catch(() => false);
   const c = dbConn.get() || {};
   main.innerHTML = `<h2>Ajustes</h2>
@@ -293,7 +293,7 @@ VIEWS.ajustes = async main => {
   if ($('#aComo')) $('#aComo').onclick = () => { sessionStorage.setItem('facol-demo-rol', 'consulta'); location.reload(); };
   const prev = () => $('#aPrev').textContent = val('aPre') + val('aSig'); $('#aPre').oninput = $('#aSig').oninput = prev; prev();
   $('#aFol').onclick = () => guard(async () => { await setConfig('folio_prefijo', val('aPre').toUpperCase()); await setConfig('folio_siguiente', +val('aSig')); }, 'Folios guardados');
-  $('#aUrlG').onclick = () => guard(() => setConfig('formularios_url', val('aUrl').replace(/\/+$/, '')), 'Guardado');
+  $('#aUrlG').onclick = () => guard(() => setConfig('formularios_url', normalizarUrlForm(val('aUrl'))).then(() => { $('#aUrl').value = normalizarUrlForm(val('aUrl')); }), 'Guardado');
   $('#aTpl').onclick = async () => { const [f] = await pickFiles('.docx'); if (!f) return;
     await guard(async () => { const campos = await Docx.campos(await f.arrayBuffer()); if (!campos.length) throw new Error('El documento no tiene campos [ENTRE CORCHETES]'); await db.upload('plantillas/contrato.docx', f); }, 'Machote actualizado'); refresh(); };
   $('#aTplD').onclick = async () => guardarBytes(new Uint8Array(await machote()), 'CONTRATO BASE.docx');
