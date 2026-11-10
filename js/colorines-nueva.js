@@ -164,18 +164,26 @@ function preguntarFacturas(op) {
   return new Promise(res => {
     let r = null;
     modal(`Solicitud de factura · ${op.folio}`, `<p style="margin-top:0">El Excel lleva una hoja oculta con la solicitud de factura del depósito (${money(op.monto_deposito)}).</p>
-      <div class="form"><label>¿En cuántas facturas se divide?</label><input id="nfN" type="number" min="1" step="1" value="${prev}"></div><div id="nfV" class="small muted" style="margin-top:8px"></div>`, [
+      <div class="form"><label>¿En cuántas facturas se divide?</label><input id="nfN" type="number" min="1" max="${MAX_FACTURAS}" step="1" value="${Math.min(prev, MAX_FACTURAS)}"></div><div id="nfV" class="small muted" style="margin-top:8px"></div>`, [
       {label: 'Cancelar', onClick: () => res(null)},
-      {label: 'Generar Excel', cls: 'primary', onClick: () => { const n = Math.max(1, Math.floor(num('nfN')) || 1); try { localStorage.setItem(key, n); } catch { /* */ } r = n; res(n); }}]);
-    const ver = () => { const n = Math.max(1, Math.floor(num('nfN')) || 1); const t = r2(op.monto_deposito / n);
+      {label: 'Generar Excel', cls: 'primary', onClick: () => { const n = Math.min(MAX_FACTURAS, Math.max(1, Math.floor(num('nfN')) || 1)); try { localStorage.setItem(key, n); } catch { /* */ } r = n; res(n); }}]);
+    const ver = () => { const n = Math.min(MAX_FACTURAS, Math.max(1, Math.floor(num('nfN')) || 1)); const t = r2(op.monto_deposito / n);
       $('#nfV').textContent = `${n} factura(s) de aprox. ${money(t)} (subtotal ${money(r2(t / 1.16))} + IVA ${money(r2(t - t / 1.16))})`; };
     $('#nfN').oninput = ver; ver(); $('#nfN').focus();
     dlg.onclose = () => res(r);
   });
 }
+/** Formato de factura (copia del FACOL de ejemplo) que viaja con la app. */
+async function plantillaFactura() {
+  try {
+    if (window.desk && desk.leerFormato) { const u8 = await desk.leerFormato('formatos/formato-factura.xlsx'); return u8 ? u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) : null; }
+    const r = await fetch('formatos/formato-factura.xlsx'); return r.ok ? r.arrayBuffer() : null;
+  } catch { return null; }
+}
+const MAX_FACTURAS = 4;   // bloques que trae la hoja FORMATO FACTURA
 async function excelFacol(op) {
   let factura = null;
-  if (op.requiere_factura !== false) { const n = await preguntarFacturas(op); if (!n) return null; factura = {n, datos: await datosColorines(op.modalidad)}; }
+  if (op.requiere_factura !== false) { const n = await preguntarFacturas(op); if (!n) return null; factura = {n, datos: await datosColorines(op.modalidad), plantilla: await plantillaFactura()}; }
   const [lineas, comisiones, coms] = await Promise.all([db.list('dispersiones', {eq: {operacion_id: op.id}, order: 'orden'}), db.list('operacion_comisiones', {eq: {operacion_id: op.id}, order: 'orden'}), cat('comisionistas')]);
   const bytes = await FacolExcel.generar(ExcelJS, {op, lineas, comisiones, coms, factura});
   return guardarBytes(bytes, `${op.folio}.xlsx`);
