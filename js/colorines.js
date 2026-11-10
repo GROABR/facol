@@ -119,7 +119,7 @@ function buscarBeneficiario(nombre, bens) {
     const s = () => { const q = val('bq');
       const m = bens.map(b => ({b, s: Math.max(Logica.nameScore(q, b.nombre), Logica.normName(b.nombre).includes(Logica.normName(q)) ? 0.95 : 0)})).filter(x => x.s > 0.4).sort((a, b) => b.s - a.s).slice(0, 20);
       $('#bl').innerHTML = m.map(x => `<div class="file"><span class="nm"><b>${esc(x.b.nombre)}</b> <span class="muted small">${esc(x.b.banco || '')} ${esc(x.b.clabe || '')}</span></span><button class="btn sm" data-b="${x.b.id}">Elegir</button></div>`).join('') || '<div class="muted">Sin coincidencias</div>';
-      $$('#bl [data-b]').forEach(b => b.onclick = () => { elegido = bens.find(x => x.id === b.dataset.b); dlg.close(); }); };
+      $$('#bl [data-b]').forEach(b => b.onclick = () => { elegido = bens.find(x => x.id === b.dataset.b); res(elegido); dlg.close(); }); };
     $('#bq').oninput = s; s();
   });
 }
