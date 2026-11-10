@@ -123,15 +123,36 @@
   }
   /** Esquema fijo de Colorines: CASA se queda con lo que resta del % total después de las terciarias;
       ABEL es un % de CASA (sale de CASA). */
-  const ESQUEMA_COLORINES = {pct: 11.5, casa: 'CASA', abel: {nombre: 'ABEL ORTIZ', pct: 35},
-    terciarias: [{nombre: 'ARTURO', pct: 1.4}, {nombre: 'OSCAR HERNANDEZ', pct: 1.6}, {nombre: 'MANUEL', pct: 1}]};
-  function lineasColorines(e = ESQUEMA_COLORINES) {
-    const sumT = (e.terciarias || []).reduce((s, t) => s + (+t.pct || 0), 0);
-    const casaPct = Math.round((+e.pct - sumT) * 10000) / 10000;
-    const L = [{id: 'casa', nombre: e.casa || 'CASA', concepto: 'COMISIÓN CASA', clase: 'casa', pct: casaPct, comisionista_id: e.casa_id || null}];
-    if (e.abel && e.abel.nombre) L.push({id: 'abel', nombre: e.abel.nombre, concepto: `COMISIÓN ${e.abel.nombre} (${e.abel.pct}% DE CASA)`, clase: 'promotor', pct: +e.abel.pct || 0, base_linea_id: 'casa', comisionista_id: e.abel.id || null});
-    (e.terciarias || []).forEach((t, i) => L.push({id: 't' + i, nombre: t.nombre, concepto: `TERCIARIA ${t.nombre}`, clase: 'terciaria', pct: +t.pct || 0, comisionista_id: t.id || null}));
-    return L.map((l, i) => ({...l, orden: i}));
+  // Cada promotor tiene su % y sobre qué se calcula: 'total' (la comisión total), 'casa' o el nombre de otro promotor.
+  const ESQUEMA_COLORINES = {pct: 11.5, casa: {nombre: 'CASA', tipo_pago: 'CASA'}, lineas: [
+    {nombre: 'ABEL ORTIZ', pct: 35, base: 'casa', tipo_pago: 'TRANSFERENCIA'},
+    {nombre: 'ARTURO', pct: 1.4, base: 'total', tipo_pago: 'EFECTIVO'},
+    {nombre: 'OSCAR HERNANDEZ', pct: 1.6, base: 'total', tipo_pago: 'EFECTIVO'},
+    {nombre: 'MANUEL', pct: 1, base: 'total', tipo_pago: 'TRANSFERENCIA/EFECTIVO'}]};
+  /** Acepta el formato anterior (terciarias + abel) y lo pasa al nuevo (lineas con base). */
+  function normalizarEsquema(e) {
+    if (!e || !e.pct) return JSON.parse(JSON.stringify(ESQUEMA_COLORINES));
+    if (Array.isArray(e.lineas)) return {...e, casa: typeof e.casa === 'string' ? {nombre: e.casa, id: e.casa_id} : (e.casa || {nombre: 'CASA'})};
+    const lineas = [];
+    if (e.abel && e.abel.nombre) lineas.push({nombre: e.abel.nombre, pct: +e.abel.pct || 0, base: 'casa', id: e.abel.id});
+    for (const t of e.terciarias || []) lineas.push({nombre: t.nombre, pct: +t.pct || 0, base: 'total', id: t.id});
+    return {pct: +e.pct, casa: {nombre: typeof e.casa === 'string' ? e.casa : 'CASA', id: e.casa_id}, lineas};
+  }
+  /** Líneas de comisión del esquema. CASA = % total − lo que va "sobre el total"; las demás salen de su base. */
+  function lineasColorines(e0 = ESQUEMA_COLORINES) {
+    const e = normalizarEsquema(e0); const ls = (e.lineas || []).filter(l => l.nombre);
+    const enTotal = l => !l.base || l.base === 'total';
+    const casaPct = Math.round((+e.pct - ls.filter(enTotal).reduce((s, l) => s + (+l.pct || 0), 0)) * 10000) / 10000;
+    const casa = e.casa || {nombre: 'CASA'};
+    const L = [{id: 'casa', nombre: casa.nombre || 'CASA', concepto: 'COMISIÓN CASA', clase: 'casa', pct: casaPct, comisionista_id: casa.id || null, tipo_pago: casa.tipo_pago || null}];
+    ls.forEach((l, i) => L.push({id: 'l' + i, nombre: l.nombre, clase: enTotal(l) ? 'terciaria' : 'promotor', pct: +l.pct || 0, comisionista_id: l.id || null, tipo_pago: l.tipo_pago || null, _base: l.base}));
+    const idDe = n => { const x = L.find(y => y.nombre === n && y.clase !== 'promotor'); return x ? x.id : null; };
+    return L.map((l, i) => {
+      const base_linea_id = l._base === 'casa' ? 'casa' : (l._base && l._base !== 'total') ? idDe(l._base) : null;
+      const sobre = base_linea_id ? L.find(x => x.id === base_linea_id).nombre : null;
+      const {_base, ...rest} = l;
+      return {...rest, base_linea_id, orden: i, concepto: l.clase === 'casa' ? l.concepto : sobre ? `COMISIÓN ${l.nombre} (${l.pct}% DE ${sobre})` : `TERCIARIA ${l.nombre}`};
+    });
   }
   /** Totales: comisión = suma de líneas sin base (las desglosadas salen de su línea padre). */
   function totalesComision(lineas) {
@@ -317,6 +338,6 @@
   }
 
   return {CAMPOS_ALTA, BANCOS_FORM, validarAlta, valoresContrato, r2, normName, tokens, nameScore, matchNombre, indexBens, BANCOS, normBanco, normalizarClabe, validarClabe,
-    bancoDeClabe, normalizarCuenta, calcComisiones, ajustarCuadre, ESQUEMA_COLORINES, lineasColorines, totalesComision, netoLinea, calcRetorno, grossUp, resumenDispersion,
+    bancoDeClabe, normalizarCuenta, calcComisiones, ajustarCuadre, ESQUEMA_COLORINES, normalizarEsquema, lineasColorines, totalesComision, netoLinea, calcRetorno, grossUp, resumenDispersion,
     ESTRATEGIAS, parsePrenomina, parseBdAltas, numLetras, edad, toNum};
 });
