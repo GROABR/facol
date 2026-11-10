@@ -1,13 +1,13 @@
 /* ---------- FACOL: clientes (con su esquema de comisiones), promotores, empresas y ajustes ---------- */
 const CLASES = {promotor: 'Promotor', terciaria: 'Terciaria', casa: 'Casa'};
-const TIPOS_PAGO = ['EFECTIVO', 'TRANSFERENCIA', 'TRANSFERENCIA/EFECTIVO'];
+const TIPOS_PAGO = ['EFECTIVO', 'TRANSFERENCIA', 'TRANSFERENCIA/EFECTIVO', 'CASA'];
 const newId = () => crypto.randomUUID();
 
 /* ===================== Clientes ===================== */
 VIEWS.clientes = async main => {
   const [cli, lines, emp] = await Promise.all([cat('clientes', true), db.list('cliente_comisiones'), cat('empresas')]);
   const empN = id => (emp.find(e => e.id === id) || {}).nombre || '—';
-  const col = modulo === 'colorines';
+  const col = esDisp(modulo);
   main.innerHTML = `<h2>${col ? 'Clientes' : 'Clientes y esquema de comisiones'}</h2>
     <div class="toolbar"><input id="q" placeholder="Buscar cliente" style="width:260px"><span class="sp"></span><button class="btn primary" id="nuevo">+ Nuevo cliente</button></div>
     <style>${col ? '.solo-ret{display:none}' : ''}</style>
@@ -36,7 +36,7 @@ async function editarCliente(c) {
       <label>Nombre corto</label><input id="cNom" value="${esc(c.nombre || '')}">
       <label>Razón social</label><input id="cRaz" value="${esc(c.razon_social || '')}">
       <label>RFC</label><input id="cRfc" value="${esc(c.rfc || '')}">
-      <label ${modulo === 'colorines' ? 'hidden' : ''}>% comisión total</label><input id="cPct" type="number" step="0.0001" value="${c.pct_comision}" ${modulo === 'colorines' ? 'hidden' : ''}>
+      <label ${esDisp(modulo) ? 'hidden' : ''}>% comisión total</label><input id="cPct" type="number" step="0.0001" value="${c.pct_comision}" ${esDisp(modulo) ? 'hidden' : ''}>
       <label>Empresa que factura</label><select id="cEF">${empOpts(c.empresa_factura_id)}</select>
       <label>Empresa receptora</label><select id="cER">${empOpts(c.empresa_receptora_id)}</select>
       <label>Banco ordenante</label><input id="cBO" value="${esc(c.banco_ordenante || '')}">
@@ -46,8 +46,8 @@ async function editarCliente(c) {
       <label>Lleva factura</label><label><input type="checkbox" id="cFac" ${c.requiere_factura ? 'checked' : ''}> Sí, se factura</label>
       <label>Activo</label><label><input type="checkbox" id="cAct" ${c.activo !== false ? 'checked' : ''}> Activo</label>
     </div>
-    ${modulo === 'colorines' ? '<p class="note info">En Colorines las comisiones son siempre las mismas; se configuran en <b>Comisiones Colorines</b>.</p>' : ''}
-    <div ${modulo === 'colorines' ? 'hidden' : ''}>
+    ${esDisp(modulo) ? '<p class="note info">En los módulos de dispersión las comisiones se configuran en <b>Datos y comisiones</b>.</p>' : ''}
+    <div ${esDisp(modulo) ? 'hidden' : ''}>
     <h3>Reparto de la comisión (Retornos)</h3>
     <p class="small muted" style="margin-top:0">Las líneas "sobre: Depósito" deben sumar el % total. Una terciaria desglosada se calcula sobre otra línea (ej. ABEL 35% de CASA) y sale de esa línea.</p>
     <div class="tablewrap"><table><thead><tr><th>Concepto</th><th>Promotor</th><th>Clase</th><th class="n">%</th><th>Sobre</th><th class="n">Ej. $100,000</th><th></th></tr></thead><tbody id="lTb"></tbody>
@@ -68,7 +68,7 @@ async function editarCliente(c) {
         solicitante: val('cSol'), autorizado_por: val('cAut'), requiere_factura: val('cFac'), activo: val('cAct')};
       if (!row.nombre) { $('#cErr').textContent = 'Falta el nombre'; return false; }
       const tot = Logica.totalesComision(lineas.map(l => ({...l, monto: +l.pct})));
-      if (modulo !== 'colorines' && lineas.length && Math.abs(tot.pct - row.pct_comision) > 0.0001 && !(await confirmar('El reparto no cuadra', `Las líneas suman ${pct(tot.pct)} y la comisión es ${pct(row.pct_comision)}. ¿Guardar así?`))) return false;
+      if (!esDisp(modulo) && lineas.length && Math.abs(tot.pct - row.pct_comision) > 0.0001 && !(await confirmar('El reparto no cuadra', `Las líneas suman ${pct(tot.pct)} y la comisión es ${pct(row.pct_comision)}. ¿Guardar así?`))) return false;
       const saved = c.id ? await db.update('clientes', c.id, row) : await db.insert('clientes', row);
       for (const l of lineasDb) await db.remove('cliente_comisiones', l.id);
       const ordenadas = [...lineas.filter(l => !l.base_linea_id), ...lineas.filter(l => l.base_linea_id)];
@@ -102,74 +102,124 @@ async function editarCliente(c) {
 }
 
 /* ===================== Esquema fijo de comisiones Colorines ===================== */
-async function esquemaColorines() { const e = await getConfig('colorines_esquema', null); return e && e.pct ? e : {...Logica.ESQUEMA_COLORINES}; }
+async function esquemaColorines(mod = modulo) { return Logica.normalizarEsquema(await getConfig(cfgModulo(mod, 'esquema'), null)); }
 /** Copia el esquema Colorines a una operación (foto del momento). */
-async function copiarEsquemaColorines(opId, base, objetivo) {
-  const e = await esquemaColorines(); const coms = await cat('comisionistas', true);
+async function copiarEsquemaColorines(opId, base, objetivo, mod = modulo) {
+  const e = await esquemaColorines(mod); const coms = await cat('comisionistas', true);
   // quien esté en el esquema y no exista en Promotores se da de alta solo
   for (const l of Logica.lineasColorines(e)) if (l.nombre && !coms.some(c => c.nombre === l.nombre))
-    coms.push(await db.insert('comisionistas', {nombre: l.nombre, tipo_pago: l.clase === 'casa' ? 'CASA' : 'EFECTIVO'}));
+    coms.push(await db.insert('comisionistas', {nombre: l.nombre, tipo_pago: l.tipo_pago || (l.clase === 'casa' ? 'CASA' : 'EFECTIVO')}));
   invalidate('comisionistas');
-  const lines =Logica.lineasColorines(e).map(l => ({...l, comisionista_id: l.comisionista_id || (coms.find(c => c.nombre === l.nombre) || {}).id || null}));
+  const lines = Logica.lineasColorines(e).map(l => ({...l, comisionista_id: (coms.find(c => c.nombre === l.nombre) || {}).id || l.comisionista_id || null}));
   const map = new Map(lines.map(l => [l.id, newId()]));
   const calc = Logica.ajustarCuadre(Logica.calcComisiones(base, lines), objetivo);
   const rows = calc.map(l => { const c = coms.find(x => x.id === l.comisionista_id);
     return {id: map.get(l.id), operacion_id: opId, comisionista_id: l.comisionista_id, nombre: l.nombre, concepto: l.concepto, clase: l.clase, pct: l.pct,
-      base_linea_id: l.base_linea_id ? map.get(l.base_linea_id) : null, monto: l.monto, tipo_pago: c ? c.tipo_pago : null, orden: l.orden}; });
+      base_linea_id: l.base_linea_id ? map.get(l.base_linea_id) : null, monto: l.monto, tipo_pago: l.tipo_pago || (c ? c.tipo_pago : null), orden: l.orden}; });
   await db.insert('operacion_comisiones', [...rows.filter(r => !r.base_linea_id), ...rows.filter(r => r.base_linea_id)]);
 }
 
 /* Colorines trabaja con un solo cliente y una sola empresa: sus datos fijos van aquí. */
-const DATOS_COLORINES = {cliente: 'STAR SEEDS', razon_social: 'STAR SEEDS PROYECTOS DE SURESTE S.A.P.I. DE C.V.', empresa_factura: 'BUILD FORCE',
-  banco_receptor: 'BANORTE', cuenta_receptora: '****67295', banco_ordenante: 'BBVA', cuenta_ordenante: '', solicitante: 'ABEL ORTIZ', autorizado_por: 'DIRECCIÓN', requiere_factura: true};
-async function datosColorines() { const d = await getConfig('colorines_datos', null); return {...DATOS_COLORINES, ...(d || {})}; }
-const CAMPOS_DATOS = [['cliente', 'Cliente (nombre corto)'], ['razon_social', 'Nombre fiscal del cliente'], ['empresa_factura', 'Empresa que factura'], ['banco_receptor', 'Banco receptor'],
-  ['cuenta_receptora', 'Cuenta receptora'], ['banco_ordenante', 'Banco ordenante'], ['cuenta_ordenante', 'Cuenta ordenante'], ['solicitante', 'Solicitante'], ['autorizado_por', 'Autorizado por']];
+const DATOS_COLORINES = {cliente: 'STAR SEEDS', razon_social: 'STAR SEEDS PROYECTOS DE SURESTE S.A.P.I. DE C.V.', rfc: '', empresa_factura: 'BUILD FORCE',
+  banco_receptor: 'BANORTE', cuenta_receptora: '****67295', banco_ordenante: 'BBVA', cuenta_ordenante: '', solicitante: 'ABEL ORTIZ', autorizado_por: 'DIRECCIÓN', requiere_factura: true,
+  concepto_factura: 'COMISIONES MERCANTILES', uso_cfdi: 'G03 Gastos en general', forma_pago_sat: '03 Transferencia electrónica de fondos', metodo_pago: 'PUE Pago en una sola exhibición'};
+const DATOS_VACIOS = {cliente: '', razon_social: '', rfc: '', empresa_factura: '', banco_receptor: '', cuenta_receptora: '', banco_ordenante: '', cuenta_ordenante: '',
+  solicitante: '', autorizado_por: 'DIRECCIÓN', requiere_factura: true, concepto_factura: 'COMISIONES MERCANTILES', uso_cfdi: 'G03 Gastos en general',
+  forma_pago_sat: '03 Transferencia electrónica de fondos', metodo_pago: 'PUE Pago en una sola exhibición'};
+async function datosColorines(mod = modulo) { const d = await getConfig(cfgModulo(mod, 'datos'), null); return {...(mod === 'colorines' ? DATOS_COLORINES : DATOS_VACIOS), ...(d || {})}; }
+const CAMPOS_DATOS = [['cliente', 'Cliente (nombre corto)'], ['razon_social', 'Nombre fiscal del cliente'], ['rfc', 'RFC del cliente'], ['empresa_factura', 'Empresa que factura'],
+  ['banco_receptor', 'Banco receptor'], ['cuenta_receptora', 'Cuenta receptora'], ['banco_ordenante', 'Banco ordenante'], ['cuenta_ordenante', 'Cuenta ordenante'],
+  ['solicitante', 'Solicitante'], ['autorizado_por', 'Autorizado por'], ['concepto_factura', 'Concepto de la factura'], ['uso_cfdi', 'Uso CFDI'],
+  ['forma_pago_sat', 'Forma de pago (factura)'], ['metodo_pago', 'Método de pago (factura)']];
+const FORMAS_PAGO = ['EFECTIVO', 'TRANSFERENCIA', 'TRANSFERENCIA/EFECTIVO', 'CASA'];
 
 VIEWS.esquemaColorines = async main => {
-  const [e0, dc] = await Promise.all([esquemaColorines(), datosColorines()]); const e = JSON.parse(JSON.stringify(e0));
-  main.innerHTML = `<h2>Datos y comisiones de Colorines</h2>
-    <div class="panel" style="margin-bottom:14px"><h3 style="margin-top:0">Cliente y empresa</h3>
-      <p class="small muted" style="margin-top:0">Se usan en todas las dispersiones: aparecen en el Excel FACOL y en el formato de dispersión.</p>
+  const [e0, dc, coms0] = await Promise.all([esquemaColorines(modulo), datosColorines(modulo), cat('comisionistas', true)]);
+  const e = JSON.parse(JSON.stringify(e0));
+  // datos de pago de cada uno (vienen de Promotores)
+  const pago = n => { const c = coms0.find(x => x.nombre === n) || {}; return {banco: c.banco || '', cuenta: c.cuenta || '', clabe: c.clabe || '', tipo_pago: c.tipo_pago || ''}; };
+  e.casa = {...pago(e.casa.nombre || 'CASA'), ...e.casa, ...{tipo_pago: e.casa.tipo_pago || pago(e.casa.nombre || 'CASA').tipo_pago || 'CASA'}};
+  e.lineas = e.lineas.map(l => ({...pago(l.nombre), ...l, tipo_pago: l.tipo_pago || pago(l.nombre).tipo_pago || 'EFECTIVO'}));
+  const lmods = modulo === 'colorines' ? [] : await getConfig('modulos', []); const mm = lmods.find(x => x.id === modulo);
+  main.innerHTML = `<h2>Datos y comisiones · ${esc(nombreModulo(modulo))}</h2>
+    ${mm ? `<div class="panel" style="margin-bottom:14px"><h3 style="margin-top:0">Módulo</h3><div class="form2">
+      <label>Nombre</label><input id="mN" value="${esc(mm.nombre)}"><label>Prefijo del folio</label><input id="mP" value="${esc(mm.prefijo)}">
+      <label>Siguiente número</label><input id="mS" type="number" value="${esc(mm.siguiente)}"><span></span><span class="small muted">Próximo folio: <b id="mPrev"></b></span></div>
+      <div class="toolbar" style="margin:10px 0 0"><button class="btn bad" id="mDel">Eliminar cliente</button><span class="sp"></span><button class="btn primary" id="mSave">Guardar módulo</button></div></div>` : ''}
+    <div class="panel" style="margin-bottom:14px"><h3 style="margin-top:0">Cliente, empresa y factura</h3>
+      <p class="small muted" style="margin-top:0">Se usan en todas las dispersiones: aparecen en el Excel FACOL, el formato de dispersión y la solicitud de factura.</p>
       <div class="form2">${CAMPOS_DATOS.map(([k, l]) => `<label>${l}</label><input id="d_${k}" value="${esc(dc[k] || '')}">`).join('')}
         <label>Lleva factura</label><label><input type="checkbox" id="d_requiere_factura" ${dc.requiere_factura !== false ? 'checked' : ''}> Sí</label></div>
       <div class="toolbar" style="margin:10px 0 0"><span class="sp"></span><button class="btn primary" id="dSave">Guardar datos</button></div></div>
-    <h3>Comisiones</h3>
-    <p class="muted" style="margin-top:0">Es el mismo reparto para todas las dispersiones de Colorines. Cada operación guarda una copia, así que los cambios aplican a las nuevas.</p>
-    <div class="cols"><div class="panel">
-      <div class="form"><label>% total que se cobra</label><input id="eP" type="number" step="0.0001" value="${e.pct}"></div>
-      <h3>Terciarias</h3><div class="tablewrap"><table><thead><tr><th>Nombre</th><th class="n">% del total</th><th></th></tr></thead><tbody id="eT"></tbody></table></div>
-      <button class="btn sm" id="eAdd" style="margin-top:6px">+ Terciaria</button>
-      <h3>Abel</h3><div class="form"><label>Nombre</label><input id="eAN" value="${esc(e.abel ? e.abel.nombre : '')}"><label>% de la Casa</label><input id="eAP" type="number" step="0.01" value="${e.abel ? e.abel.pct : 0}"></div>
-      <h3>Casa</h3><p class="small muted" style="margin:0">La Casa se queda con lo que resta del % total después de las terciarias. De su parte se paga a Abel.</p>
-    </div><div class="panel"><h3 style="margin-top:0">Ejemplo con una dispersión de <input id="eEj" type="number" value="100000" style="width:120px"></h3><div id="eV"></div></div></div>
+    <h3>Comisiones y forma de pago</h3>
+    <p class="muted" style="margin-top:0">Cada promotor tiene su % y <b>sobre qué</b> se calcula: sobre la comisión total, sobre la Casa o sobre otro promotor (sale de la parte de ese). La Casa se queda con lo que resta. Cada operación guarda una copia; los cambios aplican a las nuevas, y en cada operación puedes ajustar sus comisiones.</p>
+    <div class="panel"><div class="form" style="max-width:420px"><label>% total que se cobra</label><input id="eP" type="number" step="0.0001" value="${e.pct}"></div>
+      <div class="tablewrap" style="margin-top:10px"><table><thead><tr><th>Promotor</th><th class="n">%</th><th>Sobre</th><th>Forma de pago</th><th>Banco</th><th>Cuenta</th><th>CLABE</th><th></th></tr></thead><tbody id="eT"></tbody></table></div>
+      <button class="btn sm" id="eAdd" style="margin-top:6px">+ Promotor</button></div>
+    <div class="panel" style="margin-top:14px"><h3 style="margin-top:0">Ejemplo con una dispersión de <input id="eEj" type="number" value="100000" style="width:120px"></h3><div id="eV"></div></div>
     <div class="toolbar" style="margin-top:12px"><span class="sp"></span><button class="btn primary" id="eSave">Guardar esquema</button></div>`;
-  $('#dSave').onclick = () => guard(() => setConfig('colorines_datos', {...Object.fromEntries(CAMPOS_DATOS.map(([k]) => [k, k === 'cliente' || k === 'razon_social' ? val('d_' + k).toUpperCase() : val('d_' + k)])), requiere_factura: val('d_requiere_factura')}), 'Datos guardados');
-  const leer = () => { e.pct = num('eP'); e.abel = {nombre: val('eAN').toUpperCase(), pct: num('eAP')};
-    e.terciarias = $$('#eT tr').map(tr => ({nombre: $('.tn', tr).value.trim().toUpperCase(), pct: Logica.toNum($('.tp', tr).value)})).filter(t => t.nombre); };
+  if (mm) {
+    const pv = () => $('#mPrev').textContent = val('mP').toUpperCase() + val('mS'); $('#mP').oninput = $('#mS').oninput = pv; pv();
+    $('#mSave').onclick = () => guard(async () => {
+      const p = val('mP').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!val('mN') || !p) throw new Error('Falta el nombre o el prefijo');
+      if (lmods.some(x => x.id !== mm.id && x.prefijo === p)) throw new Error('Ese prefijo ya lo usa otro cliente');
+      Object.assign(mm, {nombre: val('mN').toUpperCase(), prefijo: p, siguiente: Math.max(1, Math.floor(num('mS')) || 1)}); await setConfig('modulos', lmods); await cargarModulos(); renderNav();
+    }, 'Módulo guardado');
+    $('#mDel').onclick = async () => {
+      const ops = await db.list('operaciones', {eq: {modalidad: mm.id}, select: 'id'});
+      if (ops.length) return toast(`No se puede: tiene ${ops.length} operación(es). Bórralas primero.`);
+      if (!(await confirmar('Eliminar cliente', `¿Eliminar el módulo ${esc(mm.nombre)}? Sus datos y comisiones se borran.`, 'Eliminar', 'bad'))) return;
+      await guard(async () => { await setConfig('modulos', lmods.filter(x => x.id !== mm.id)); await cargarModulos(); }, 'Cliente eliminado'); setModulo('colorines');
+    };
+  }
+  $('#dSave').onclick = () => guard(() => setConfig(cfgModulo(modulo, 'datos'), {...Object.fromEntries(CAMPOS_DATOS.map(([k]) => [k, ['cliente', 'razon_social', 'rfc'].includes(k) ? val('d_' + k).toUpperCase() : val('d_' + k)])), requiere_factura: val('d_requiere_factura')}), 'Datos guardados');
+  const fila = (l, i) => {
+    const casa = i < 0; const top = e.lineas.filter((x, j) => j !== i && (!x.base || x.base === 'total') && x.nombre);
+    const sobre = casa ? '<span class="muted small">lo que resta</span>' : `<select class="tb">${[['total', 'Comisión total'], ['casa', 'Casa'], ...top.map(x => [x.nombre, x.nombre])].map(([k, t]) => `<option value="${esc(k)}" ${k === (l.base || 'total') ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    return `<tr data-i="${i}"><td>${casa ? `<b>${esc(l.nombre || 'CASA')}</b>` : `<input class="tn" value="${esc(l.nombre)}" style="width:150px">`}</td>
+      <td class="n">${casa ? `<b id="eCasa"></b>` : `<input class="tp" type="number" step="0.0001" value="${l.pct}" style="width:78px;text-align:right">`}</td><td>${sobre}</td>
+      <td><select class="tf">${FORMAS_PAGO.map(f => `<option ${f === l.tipo_pago ? 'selected' : ''}>${f}</option>`).join('')}</select></td>
+      <td><input class="tbk" value="${esc(l.banco || '')}" style="width:100px"></td><td><input class="tct" value="${esc(l.cuenta || '')}" style="width:110px"></td><td><input class="tcl" value="${esc(l.clabe || '')}" style="width:165px"></td>
+      <td>${casa ? '' : '<button class="link tx" style="color:var(--bad)">✕</button>'}</td></tr>`;
+  };
+  const leer = () => {
+    e.pct = num('eP');
+    $$('#eT tr').forEach(tr => { const i = +tr.dataset.i; const o = i < 0 ? e.casa : e.lineas[i];
+      if (i >= 0) { o.nombre = $('.tn', tr).value.trim().toUpperCase(); o.pct = Logica.toNum($('.tp', tr).value); o.base = $('.tb', tr).value; }
+      o.tipo_pago = $('.tf', tr).value; o.banco = $('.tbk', tr).value.trim().toUpperCase(); o.cuenta = $('.tct', tr).value.replace(/\s/g, ''); o.clabe = $('.tcl', tr).value.replace(/\s/g, ''); });
+  };
   const ver = () => {
     leer(); const ls = Logica.calcComisiones(num('eEj'), Logica.lineasColorines(e)); const casa = ls.find(l => l.clase === 'casa');
-    $('#eV').innerHTML = `<table><thead><tr><th>Concepto</th><th class="n">%</th><th class="n">Monto</th></tr></thead><tbody>
-      <tr><td><b>CASA</b></td><td class="n">${pct(casa.pct)}</td><td class="n">${money(casa.monto)}</td></tr>
-      ${ls.filter(l => l.base_linea_id).map(l => `<tr class="sub"><td>↳ ${esc(l.nombre)} (sale de la Casa)</td><td class="n">${pct(l.pct)} de Casa</td><td class="n">${money(l.monto)}</td></tr>`).join('')}
-      <tr class="sub"><td>↳ Casa neto</td><td></td><td class="n">${money(Logica.netoLinea(casa, ls))}</td></tr>
-      ${ls.filter(l => l.clase === 'terciaria').map(l => `<tr><td>${esc(l.nombre)} <span class="tag">terciaria</span></td><td class="n">${pct(l.pct)}</td><td class="n">${money(l.monto)}</td></tr>`).join('')}
-      </tbody><tfoot><tr><td>Total comisión</td><td class="n">${pct(Logica.totalesComision(ls).pct)}</td><td class="n">${money(Logica.totalesComision(ls).total)}</td></tr></tfoot></table>
-      ${casa.pct < 0 ? '<div class="err">Las terciarias suman más que el % total</div>' : ''}`;
+    if ($('#eCasa')) $('#eCasa').textContent = pct(casa.pct);
+    const hijos = p => ls.filter(x => x.base_linea_id === p.id).map(x => `<tr class="sub"><td>↳ ${esc(x.nombre)} <span class="small muted">(${pct(x.pct)} de ${esc(p.nombre)}, sale de su parte)</span></td><td>${esc(x.tipo_pago || '')}</td><td class="n">${money(x.monto)}</td></tr>`).join('');
+    $('#eV').innerHTML = `<table><thead><tr><th>Concepto</th><th>Forma de pago</th><th class="n">Monto</th></tr></thead><tbody>
+      ${ls.filter(l => !l.base_linea_id).map(l => `<tr><td><b>${esc(l.nombre)}</b> <span class="small muted">${pct(l.pct)} ${l.clase === 'casa' ? '' : 'del total'}</span></td><td>${esc(l.tipo_pago || '')}</td><td class="n">${money(l.monto)}</td></tr>${hijos(l)}
+        ${ls.some(x => x.base_linea_id === l.id) ? `<tr class="sub"><td>↳ ${esc(l.nombre)} neto</td><td></td><td class="n">${money(Logica.netoLinea(l, ls))}</td></tr>` : ''}`).join('')}
+      </tbody><tfoot><tr><td>Total comisión (${pct(Logica.totalesComision(ls).pct)})</td><td></td><td class="n">${money(Logica.totalesComision(ls).total)}</td></tr></tfoot></table>
+      ${casa.pct < 0 ? '<div class="err">Los promotores "sobre el total" suman más que el % total</div>' : ''}
+      ${e.lineas.some(l => l.clabe && !Logica.validarClabe(l.clabe).ok) || (e.casa.clabe && !Logica.validarClabe(e.casa.clabe).ok) ? '<div class="err">Hay una CLABE con error</div>' : ''}`;
   };
-  const drawT = () => { $('#eT').innerHTML = e.terciarias.map(t => `<tr><td><input class="tn" value="${esc(t.nombre)}" style="width:100%"></td><td class="n"><input class="tp" type="number" step="0.0001" value="${t.pct}" style="width:90px;text-align:right"></td><td><button class="link tx" style="color:var(--bad)">✕</button></td></tr>`).join('');
-    $$('#eT input').forEach(i => i.oninput = ver); $$('#eT .tx').forEach((b, i) => b.onclick = () => { leer(); e.terciarias.splice(i, 1); drawT(); }); ver(); };
-  $('#eAdd').onclick = () => { leer(); e.terciarias.push({nombre: '', pct: 0}); drawT(); };
-  ['eP', 'eAN', 'eAP', 'eEj'].forEach(id => $('#' + id).oninput = ver); drawT();
+  const drawT = () => { $('#eT').innerHTML = fila(e.casa, -1) + e.lineas.map((l, i) => fila(l, i)).join('');
+    $$('#eT input, #eT select').forEach(x => { x.oninput = ver; x.onchange = () => { leer(); drawT(); }; });
+    $$('#eT .tx').forEach(b => b.onclick = () => { leer(); const i = +b.closest('tr').dataset.i; const n = e.lineas[i].nombre;
+      e.lineas.splice(i, 1); e.lineas.forEach(x => { if (x.base === n) x.base = 'total'; }); drawT(); }); ver(); };
+  $('#eAdd').onclick = () => { leer(); e.lineas.push({nombre: '', pct: 0, base: 'total', tipo_pago: 'EFECTIVO'}); drawT(); };
+  ['eP', 'eEj'].forEach(id => $('#' + id).oninput = ver); drawT();
   $('#eSave').onclick = () => guard(async () => {
-    leer(); if (Logica.lineasColorines(e)[0].pct < 0) throw new Error('Las terciarias suman más que el % total');
-    // da de alta en Promotores a quien falte, para el reporte de comisiones
+    leer(); e.lineas = e.lineas.filter(l => l.nombre);
+    if (Logica.lineasColorines(e)[0].pct < 0) throw new Error('Los promotores "sobre el total" suman más que el % total');
+    const nombres = e.lineas.map(l => l.nombre); if (new Set(nombres).size !== nombres.length) throw new Error('Hay promotores repetidos');
+    for (const x of [e.casa, ...e.lineas]) if (x.clabe) { const v = Logica.validarClabe(x.clabe); if (!v.ok) throw new Error(`${x.nombre || 'CASA'}: ${v.motivo}`); x.clabe = Logica.normalizarClabe(x.clabe); }
+    // los datos de pago se guardan también en Promotores (los usan el Excel y el formato de dispersión)
     const coms = await cat('comisionistas', true);
-    for (const n of [e.casa || 'CASA', e.abel.nombre, ...e.terciarias.map(t => t.nombre)].filter(Boolean))
-      if (!coms.some(c => c.nombre === n)) coms.push(await db.insert('comisionistas', {nombre: n, tipo_pago: n === 'CASA' ? 'CASA' : 'EFECTIVO'}));
-    e.casa_id = (coms.find(c => c.nombre === (e.casa || 'CASA')) || {}).id; e.abel.id = (coms.find(c => c.nombre === e.abel.nombre) || {}).id;
-    e.terciarias.forEach(t => t.id = (coms.find(c => c.nombre === t.nombre) || {}).id);
-    await setConfig('colorines_esquema', e); invalidate('comisionistas');
+    for (const x of [{...e.casa, nombre: e.casa.nombre || 'CASA'}, ...e.lineas]) {
+      const datos = {tipo_pago: x.tipo_pago, banco: x.banco || null, cuenta: x.cuenta || null, clabe: x.clabe || null};
+      const c = coms.find(y => y.nombre === x.nombre);
+      x.id = c ? (await db.update('comisionistas', c.id, datos), c.id) : (await db.insert('comisionistas', {nombre: x.nombre, ...datos})).id;
+    }
+    const limpio = {pct: e.pct, casa: {nombre: e.casa.nombre || 'CASA', id: e.casa.id, tipo_pago: e.casa.tipo_pago},
+      lineas: e.lineas.map(l => ({nombre: l.nombre, pct: l.pct, base: l.base || 'total', tipo_pago: l.tipo_pago, id: l.id}))};
+    await setConfig(cfgModulo(modulo, 'esquema'), limpio); invalidate('comisionistas');
   }, 'Esquema guardado');
 };
 
