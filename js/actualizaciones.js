@@ -2,6 +2,12 @@
    Al abrir, la app de escritorio busca una versión nueva, la descarga sola y muestra un aviso para reiniciar.
    Después de actualizar (o la primera vez que abres una versión nueva) aparecen las novedades. */
 const NOVEDADES = [
+  {version: '1.7.2', puntos: [
+    'El cuestionario de alta se envía por correo (con Outlook) en lugar de copiar la liga; ya no pide asesor.',
+    'El contrato se llena con la firma y la huella: la app detecta en el machote las líneas de firma del socio y los recuadros de huella.',
+    'En el cuestionario, huella, nombre escrito a mano e INE solo aceptan imágenes (JPG o PNG).',
+    'Se puede borrar a una persona de Beneficiarios y borrar invitaciones.',
+    'Las ligas de los formularios se corrigen solas si en Ajustes se pegó la dirección del repositorio.']},
   {version: '1.7.1', puntos: [
     'La app ahora se llama GROA, con colores acordes a la paleta.',
     'El Excel FACOL ahora trae la hoja FORMATO FACTURA (oculta) idéntica a la del FACOL de ejemplo, con un bloque por factura (hasta 4).',
