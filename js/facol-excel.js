@@ -122,8 +122,10 @@
     const tr = 4 + Math.max(formato.length, 1); celda(fd, `F${tr}`, 'TOTAL', {bold: 1, fill: GRIS});
     celda(fd, `G${tr}`, {formula: formato.length ? `SUM(G4:G${tr - 1})` : '0', result: R(formato.reduce((s, d) => s + +d.monto, 0))}, {money: 1, bold: 1, fill: GRIS});
 
-    /* ---------- SOLICITUD FACTURA (oculta): el depósito dividido en N facturas ---------- */
-    if (factura && factura.n > 0) {
+    /* ---------- FORMATO FACTURA (oculta): idéntica a la del FACOL de ejemplo ---------- */
+    if (factura && factura.n > 0 && factura.plantilla) await formatoFactura(ExcelJS, wb, op, dep, factura);
+    /* (respaldo si no se tiene el formato) SOLICITUD FACTURA sencilla */
+    else if (factura && factura.n > 0) {
       const sf = wb.addWorksheet('SOLICITUD FACTURA'); const d = factura.datos || {};
       sf.columns = [{width: 3}, {width: 30}, {width: 46}, {width: 3}, {width: 12}, {width: 34}, {width: 18}, {width: 18}];
       const n = Math.max(1, Math.floor(factura.n));
@@ -160,5 +162,36 @@
     const buf = await wb.xlsx.writeBuffer();
     return new Uint8Array(buf);
   }
-  return {generar};
+  /** Copia la hoja FORMATO FACTURA del formato (app/formatos/formato-factura.xlsx) y llena un bloque por factura.
+      Cada bloque ocupa 40 filas (empieza en la 3, 43, 83…); la celda Q1 es "No. Fact". */
+  async function formatoFactura(ExcelJS, wb, op, dep, factura) {
+    const t = new ExcelJS.Workbook(); await t.xlsx.load(factura.plantilla);
+    const src = t.worksheets[0]; const ws = wb.addWorksheet('FORMATO FACTURA');
+    ws.model = Object.assign({}, src.model, {name: 'FORMATO FACTURA', mergeCells: src.model.merges});
+    const d = factura.datos || {};
+    const bloques = []; for (let r = 3; r < 400; r += 40) if (String(ws.getCell(`B${r + 1}`).value || '').startsWith('Empresa Que Factura')) bloques.push(r); else break;
+    const n = Math.min(Math.max(1, Math.floor(factura.n)), bloques.length);
+    // reparto exacto en centavos; la última factura absorbe la diferencia
+    const totalC = Math.round(dep * 100), base = Math.floor(totalC / n);
+    const totales = Array.from({length: n}, (_, i) => (i === n - 1 ? totalC - base * (n - 1) : base) / 100);
+    ws.getCell('Q1').value = n;
+    const fecha = fmtDay(op.fecha_deposito);
+    totales.forEach((tot, i) => {
+      const r = bloques[i], set = (dr, col, v) => { ws.getCell(`${col}${r + dr}`).value = v; };
+      set(1, 'F', op.empresa_factura || d.empresa_factura || '');
+      set(3, 'F', op.razon_social || op.cliente_nombre || '');
+      set(4, 'D', d.rfc || '');
+      set(8, 'D', fecha);
+      set(11, 'D', d.forma_pago_sat || '03TRANSFERENCIA ELECTRONICA DE FONDO'); set(11, 'I', d.uso_cfdi || 'G03 Gastos en general');
+      set(12, 'D', d.metodo_pago || 'PUE PAGO EN UNA SOLA EXHIBICION'); set(13, 'D', 'MXN-PESO MEXICANO');
+      set(16, 'B', 1); set(16, 'F', d.concepto_factura || 'COMISIONES MERCANTILES');
+      const unit = Math.round(tot / 1.16 * 1e6) / 1e6;                       // así subtotal + IVA (16%) = total de esta factura
+      set(16, 'K', unit); set(16, 'N', {formula: `+B${r + 16}*K${r + 16}`, result: unit});
+      set(32, 'C', op.banco_receptor || d.banco_receptor || ''); set(33, 'C', op.cuenta_receptora || d.cuenta_receptora || '');
+      set(35, 'F', `${op.folio} · factura ${i + 1} de ${n}`);
+    });
+    ws.state = 'hidden';
+    return n;
+  }
+  return {generar, formatoFactura};
 });
