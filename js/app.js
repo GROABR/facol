@@ -237,7 +237,7 @@ async function go(v, arg) {
 }
 const refresh = () => go(view, viewArg);
 
-function loginBox(inner) { const L = $('#login'); L.style.display = 'flex'; L.innerHTML = `<div class="box"><h1>FACOL</h1>${inner}</div>`; }
+function loginBox(inner) { const L = $('#login'); L.style.display = 'flex'; L.innerHTML = `<div class="box"><h1>GROA</h1>${inner}</div>`; }
 function renderConexion(msg = '') {
   const c = dbConn.get() || {};
   loginBox(`<p class="muted" style="margin-top:0">Conecta la app con tu proyecto de Supabase (Project Settings → API).</p>
@@ -279,4 +279,5 @@ async function boot() {
   $('#me').innerHTML = `${db.mode === 'demo' ? '<span class="demo">DEMO</span><br>' : ''}${esc(me.email)}${esConsulta() ? '<br><span class="small">solo consulta</span>' : ''}<br><button id="out">Salir</button>`;
   $('#out').onclick = async () => { await db.signOut(); location.reload(); };
   go(esConsulta() ? 'consultaContratos' : 'inicio');
+  iniciarActualizaciones().catch(e => console.warn(e));
 }
