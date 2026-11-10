@@ -24,7 +24,7 @@
    * @param ExcelJS librería
    * @param datos {op, lineas: dispersiones, comisiones: operacion_comisiones, coms: catálogo de promotores}
    */
-  async function generar(ExcelJS, {op, lineas, comisiones, coms = []}) {
+  async function generar(ExcelJS, {op, lineas, comisiones, coms = [], factura = null}) {
     const wb = new ExcelJS.Workbook(); wb.creator = 'FACOL'; wb.created = new Date();
     const pct = +op.pct_comision; const dep = +op.monto_deposito;
     const n = lineas.length;
@@ -121,6 +121,34 @@
     if (!formato.length) { fd.mergeCells('E4:L4'); const c = fd.getCell('E4'); c.value = 'Sin colaboradores en efectivo, PayPal o SWIFT (todos van en PRENOMINA).'; c.font = {italic: true, color: {argb: 'FF666666'}}; }
     const tr = 4 + Math.max(formato.length, 1); celda(fd, `F${tr}`, 'TOTAL', {bold: 1, fill: GRIS});
     celda(fd, `G${tr}`, {formula: formato.length ? `SUM(G4:G${tr - 1})` : '0', result: R(formato.reduce((s, d) => s + +d.monto, 0))}, {money: 1, bold: 1, fill: GRIS});
+
+    /* ---------- SOLICITUD FACTURA (oculta): el depósito dividido en N facturas ---------- */
+    if (factura && factura.n > 0) {
+      const sf = wb.addWorksheet('SOLICITUD FACTURA'); const d = factura.datos || {};
+      sf.columns = [{width: 3}, {width: 30}, {width: 46}, {width: 3}, {width: 12}, {width: 34}, {width: 18}, {width: 18}];
+      const n = Math.max(1, Math.floor(factura.n));
+      // reparto en centavos para que la suma sea exacta: subtotal = depósito / 1.16
+      const totalC = Math.round(dep * 100), base = Math.floor(totalC / n);
+      const totales = Array.from({length: n}, (_, i) => (i === n - 1 ? totalC - base * (n - 1) : base) / 100);
+      let r = 1;
+      totales.forEach((tot, i) => {
+        const sub = R(tot / 1.16), iva = R(tot - sub);
+        titulo(sf, `B${r}:H${r}`, `SOLICITUD DE FACTURA ${i + 1} DE ${n} · ${op.folio}`); r += 2;
+        for (const [k, v] of [['EMPRESA QUE FACTURA', op.empresa_factura || d.empresa_factura], ['NOMBRE O RAZÓN SOCIAL CLIENTE', op.razon_social || op.cliente_nombre], ['R.F.C.', d.rfc || ''],
+          ['FECHA', fmtDay(op.fecha_deposito)], ['FORMA DE PAGO', d.forma_pago_sat || '03 Transferencia electrónica de fondos'], ['MÉTODO DE PAGO', d.metodo_pago || 'PUE Pago en una sola exhibición'],
+          ['USO CFDI', d.uso_cfdi || 'G03 Gastos en general'], ['MONEDA', 'MXN - PESO MEXICANO'], ['BANCO / CUENTA', [op.banco_receptor, op.cuenta_receptora].filter(Boolean).join(' / ')]]) {
+          celda(sf, `B${r}`, k, {bold: 1, fill: GRIS}); sf.mergeCells(`C${r}:H${r}`); celda(sf, `C${r}`, v || ''); r++;
+        }
+        r++;
+        sf.getRow(r).getCell(2).value = 'CANTIDAD'; sf.getRow(r).getCell(3).value = 'DESCRIPCIÓN'; sf.getRow(r).getCell(7).value = 'VALOR UNITARIO'; sf.getRow(r).getCell(8).value = 'IMPORTE';
+        encabezado(sf.getRow(r), 2, 8); sf.mergeCells(`C${r}:F${r}`); r++;
+        celda(sf, `B${r}`, 1); sf.mergeCells(`C${r}:F${r}`); celda(sf, `C${r}`, d.concepto_factura || 'COMISIONES MERCANTILES'); celda(sf, `G${r}`, sub, {money: 1}); celda(sf, `H${r}`, {formula: `B${r}*G${r}`, result: sub}, {money: 1}); const fr = r; r++;
+        celda(sf, `G${r}`, 'SUBTOTAL', {bold: 1, fill: GRIS}); celda(sf, `H${r}`, {formula: `H${fr}`, result: sub}, {money: 1}); r++;
+        celda(sf, `G${r}`, 'IVA 16%', {bold: 1, fill: GRIS}); celda(sf, `H${r}`, iva, {money: 1}); r++;
+        celda(sf, `G${r}`, 'TOTAL', {bold: 1, fill: CLARO}); celda(sf, `H${r}`, {formula: `H${r - 2}+H${r - 1}`, result: tot}, {money: 1, bold: 1, fill: CLARO}); r += 3;
+      });
+      sf.state = 'hidden';
+    }
 
     // la hoja de comisiones va oculta; ninguna hoja lleva líneas de cuadrícula
     cs.state = 'hidden';
