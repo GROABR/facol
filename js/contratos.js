@@ -127,6 +127,21 @@ async function enviarCorreoAlta(i, url) {
   window.open(`mailto:${encodeURIComponent(i.correo)}?subject=${encodeURIComponent(msg.subject)}&body=${encodeURIComponent(texto)}`);
   return 'redactado';
 }
+/** Correo con la liga del formulario de cambio de cuenta (es la misma liga para todos). */
+async function enviarCorreoCambio(correo, nombre, url) {
+  const firma = esDisp(modulo) ? nombreModulo(modulo) : 'Colorines'; const link = `${url}/cambio.html`;
+  const msg = {to: correo, subject: `${firma} · Actualiza tu cuenta para pagos`,
+    html: `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;color:#1d2733;max-width:560px">
+      <p>Hola${nombre ? ' ' + esc(nombre) : ''}:</p>
+      <p>Si necesitas cambiar la cuenta bancaria donde recibes tus pagos, llena este formulario. Verifica muy bien tu número de cuenta y tu CLABE (18 dígitos).</p>
+      <p style="margin:26px 0"><a href="${link}" style="background:#1f5fbf;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Cambiar mi cuenta</a></p>
+      <p style="font-size:13px;color:#6b7785">Si el botón no abre, copia esta liga en tu navegador:<br>${link}</p>
+      <p style="font-size:13px;color:#6b7785">El cambio se aplica hasta que lo revisemos; mientras tanto tus pagos siguen a tu cuenta actual.</p>
+      <p>Saludos,<br><b>${esc(firma)}</b></p></div>`};
+  if (window.desk && desk.enviarCorreo) { const r = await desk.enviarCorreo(msg); if (r && r.ok) return 'enviado'; }
+  window.open(`mailto:${encodeURIComponent(correo)}?subject=${encodeURIComponent(msg.subject)}&body=${encodeURIComponent('Para cambiar la cuenta donde recibes tus pagos llena este formulario: ' + link)}`);
+  return 'redactado';
+}
 const avisoEnvio = (r, n = 1) => toast(r === 'enviado' ? `Cuestionario enviado por correo${n > 1 ? ` a ${n} personas` : ''}` : 'Se abrió tu correo con el mensaje listo: solo presiona Enviar');
 
 function nuevaInvitacion(url) {
