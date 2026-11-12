@@ -113,7 +113,7 @@ const normalizarUrlForm = u => {
   u = u.replace(/^https?:\/\/gmoro27\.github\.io\//i, 'https://groabr.github.io/');   // los formularios se movieron a la organización GROABR
   return u || FORMS_URL;
 };
-async function urlFormularios() { return normalizarUrlForm(await getConfig('formularios_url', FORMS_URL)); }
+async function urlFormularios() { return normalizarUrlForm(await getConfig('formularios_url', FORMS_URL).catch(() => FORMS_URL)); }
 
 /* ----- catálogos en memoria ----- */
 const cache = {};
@@ -165,6 +165,8 @@ const NAV_RETORNO = [
 ];
 // usuarios de solo consulta: ven contratos, la BD de beneficiarios, facturas y comprobantes
 const NAV_CONSULTA = [
+  {sec: 'Enviar'},
+  {id: 'consultaEnvios', label: 'Enviar cuestionarios'},
   {sec: 'Consulta'},
   {id: 'consultaContratos', label: 'Contratos'},
   {id: 'consultaBeneficiarios', label: 'Beneficiarios (BD)'},
