@@ -165,31 +165,32 @@
   /** Copia la hoja FORMATO FACTURA del formato (app/formatos/formato-factura.xlsx) y llena un bloque por factura.
       Cada bloque ocupa 40 filas (empieza en la 3, 43, 83…); la celda Q1 es "No. Fact". */
   async function formatoFactura(ExcelJS, wb, op, dep, factura) {
+    // Formato estandarizado: se copia tal cual (colores, letras, bordes, textos y fórmulas) y solo se llenan los datos.
     const t = new ExcelJS.Workbook(); await t.xlsx.load(factura.plantilla);
     const src = t.worksheets[0]; const ws = wb.addWorksheet('FORMATO FACTURA');
     ws.model = Object.assign({}, src.model, {name: 'FORMATO FACTURA', mergeCells: src.model.merges});
+    // las celdas dentro de una combinación pierden sus bordes/relleno al combinar: se copian uno por uno
+    const dims = src.dimensions || {bottom: 200, right: 17};
+    for (let r = 1; r <= Math.max(dims.bottom || 0, 200); r++) for (let c = 1; c <= Math.max(dims.right || 0, 17); c++) {
+      const s = src.getCell(r, c).style; if (s && Object.keys(s).length) ws.getCell(r, c).style = JSON.parse(JSON.stringify(s));
+    }
+    // el tema de colores del formato original (sin esto los azules cambian de tono)
+    if (t._themes && Object.keys(t._themes).length) wb._themes = t._themes;
+    wb.calcProperties = Object.assign({}, wb.calcProperties, {fullCalcOnLoad: true});   // Excel recalcula al abrir, como en el original
     const d = factura.datos || {};
     const bloques = []; for (let r = 3; r < 400; r += 40) if (String(ws.getCell(`B${r + 1}`).value || '').startsWith('Empresa Que Factura')) bloques.push(r); else break;
     const n = Math.min(Math.max(1, Math.floor(factura.n)), bloques.length);
-    // reparto exacto en centavos; la última factura absorbe la diferencia
-    const totalC = Math.round(dep * 100), base = Math.floor(totalC / n);
-    const totales = Array.from({length: n}, (_, i) => (i === n - 1 ? totalC - base * (n - 1) : base) / 100);
-    ws.getCell('Q1').value = n;
-    const fecha = fmtDay(op.fecha_deposito);
-    totales.forEach((tot, i) => {
-      const r = bloques[i], set = (dr, col, v) => { ws.getCell(`${col}${r + dr}`).value = v; };
-      set(1, 'F', op.empresa_factura || d.empresa_factura || '');
-      set(3, 'F', op.razon_social || op.cliente_nombre || '');
-      set(4, 'D', d.rfc || '');
-      set(8, 'D', fecha);
-      set(11, 'D', d.forma_pago_sat || '03TRANSFERENCIA ELECTRONICA DE FONDO'); set(11, 'I', d.uso_cfdi || 'G03 Gastos en general');
-      set(12, 'D', d.metodo_pago || 'PUE PAGO EN UNA SOLA EXHIBICION'); set(13, 'D', 'MXN-PESO MEXICANO');
-      set(16, 'B', 1); set(16, 'F', d.concepto_factura || 'COMISIONES MERCANTILES');
-      const unit = Math.round(tot / 1.16 * 1e6) / 1e6;                       // así subtotal + IVA (16%) = total de esta factura
-      set(16, 'K', unit); set(16, 'N', {formula: `+B${r + 16}*K${r + 16}`, result: unit});
-      set(32, 'C', op.banco_receptor || d.banco_receptor || ''); set(33, 'C', op.cuenta_receptora || d.cuenta_receptora || '');
-      set(35, 'F', `${op.folio} · factura ${i + 1} de ${n}`);
+    ws.getCell('Q1').value = n;                                               // "No. Fact"
+    const empresa = op.empresa_factura || d.empresa_factura || '', cliente = op.razon_social || op.cliente_nombre || '';
+    const sub1 = Math.round(dep / 1.16 / n * 1e6) / 1e6;
+    bloques.forEach((r, i) => {
+      if (i >= n) return;                                                      // los bloques que no se usan quedan como en el formato
+      ws.getCell(`F${r + 1}`).value = empresa;
+      ws.getCell(`F${r + 3}`).value = cliente;
+      if (d.rfc) ws.getCell(`D${r + 4}`).value = d.rfc;
     });
+    // valor unitario igual que en el original: depósito (de FORMATO DISP) / 1.16 / No. Fact; los demás bloques lo toman con sus fórmulas
+    ws.getCell(`K${bloques[0] + 16}`).value = {formula: `(((+'FORMATO DISP'!$C$15)/1.16))/$Q$1`, result: sub1};
     ws.state = 'hidden';
     return n;
   }
