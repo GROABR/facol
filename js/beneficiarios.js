@@ -131,7 +131,7 @@ VIEWS.cambios = async (main, arg) => {
   const url = await urlFormularios();
   main.innerHTML = `<h2>Solicitudes de cambio de cuenta</h2>
     <div class="toolbar"><select id="ce">${[['pendiente', 'Pendientes'], ['aplicado', 'Aplicadas'], ['rechazado', 'Rechazadas'], ['', 'Todas']].map(([k, l]) => `<option value="${k}" ${k === estado ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <span class="sp"></span>${url ? `<input readonly value="${esc(url)}/cambio.html" style="width:340px" id="cUrl"><button class="btn" id="cCopy">Copiar liga del formulario</button>` : '<span class="muted">Configura la dirección de los formularios en Ajustes para obtener la liga.</span>'}</div>
+      <span class="sp"></span>${url ? `<input readonly value="${esc(url)}/cambio.html" style="width:340px" id="cUrl"><button class="btn" id="cCopy">Copiar liga del formulario</button><button class="btn primary" id="cMail">Enviar liga por correo</button>` : '<span class="muted">Configura la dirección de los formularios en Ajustes para obtener la liga.</span>'}</div>
     <div class="note info">Nada se cambia solo: revisa cada solicitud, confirma con la persona por un medio conocido si hay duda, y presiona "Aplicar". La cuenta anterior queda en el historial.</div>
     <div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Solicitante</th><th>Correo</th><th>Nueva cuenta</th><th>Validación</th><th>Coincide con</th><th>Estado</th></tr></thead><tbody>
     ${rows.map(r => { const n = [r.apellido_paterno, r.apellido_materno, r.nombres].join(' '); const v = Logica.validarClabe(r.clabe, r.banco); const m = Logica.matchNombre(n, bens);
@@ -140,6 +140,9 @@ VIEWS.cambios = async (main, arg) => {
     </tbody></table></div>`;
   $('#ce').onchange = () => go('cambios', {estado: val('ce')});
   if ($('#cCopy')) $('#cCopy').onclick = () => { navigator.clipboard.writeText($('#cUrl').value); toast('Liga copiada'); };
+  if ($('#cMail')) $('#cMail').onclick = () => modal('Enviar liga de cambio de cuenta', `<div class="form"><label>Nombre (opcional)</label><input id="mcN"><label>Correo</label><input id="mcC" type="email"></div><div class="err" id="mcE"></div>`, [
+    {label: 'Cancelar'}, {label: 'Enviar', cls: 'primary', onClick: async () => { const c = val('mcC').toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c)) { $('#mcE').textContent = 'Escribe un correo válido'; return false; }
+      const r = await enviarCorreoCambio(c, val('mcN'), url); toast(r === 'enviado' ? 'Liga enviada' : 'Se abrió tu correo con el mensaje listo: solo presiona Enviar'); }}]);
   $$('tr[data-id]').forEach(tr => tr.onclick = () => revisarCambio(rows.find(r => r.id === tr.dataset.id), bens));
 };
 
