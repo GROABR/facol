@@ -64,6 +64,45 @@ async function consultaArchivos(main, tipo, titulo) {
 }
 VIEWS.consultaFacturas = main => consultaArchivos(main, 'factura', 'Facturas');
 
+/* ===================== Enviar cuestionarios (también para usuarios de solo consulta) ===================== */
+VIEWS.consultaEnvios = async main => {
+  const url = await urlFormularios();
+  const mias = (await db.list('invitaciones', {order: 'created_at', desc: true})).filter(i => esConsulta() ? i.created_by === me.email : true).slice(0, 100);
+  const correoOk = c => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c);
+  main.innerHTML = `<h2>Enviar cuestionarios</h2>
+    <div class="cols">
+      <div class="panel"><h3 style="margin-top:0">Cuestionario de alta</h3>
+        <p class="small muted" style="margin-top:0">Le llega por correo una liga personal para llenar sus datos, firmar y subir su huella e INE. El equipo revisa y genera su contrato.</p>
+        <div class="form"><label>Nombre</label><input id="eaN"><label>Correo</label><input id="eaC" type="email"><label>Celular (opcional)</label><input id="eaT"></div>
+        <div class="err" id="eaE"></div><div class="toolbar" style="margin:6px 0 0"><span class="sp"></span><button class="btn primary" id="eaGo">Enviar cuestionario</button></div></div>
+      <div class="panel"><h3 style="margin-top:0">Cambio de cuenta</h3>
+        <p class="small muted" style="margin-top:0">Le llega por correo la liga para registrar su cuenta nueva. El cambio se aplica hasta que el equipo lo revisa.</p>
+        <div class="form"><label>Nombre (opcional)</label><input id="ecN"><label>Correo</label><input id="ecC" type="email"></div>
+        <div class="err" id="ecE"></div><div class="toolbar" style="margin:6px 0 0"><button class="btn" id="ecCopy">Copiar liga</button><span class="sp"></span><button class="btn primary" id="ecGo">Enviar liga de cambio</button></div></div>
+    </div>
+    <h3>${esConsulta() ? 'Cuestionarios que has enviado' : 'Últimos cuestionarios enviados'}</h3>
+    <div class="tablewrap"><table><thead><tr><th>Enviado</th><th>Para</th><th>Correo</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${mias.map(i => `<tr><td>${fmtDate(i.created_at)}</td><td><b>${esc(i.nombre || '')}</b></td><td>${esc(i.correo || '')}</td>
+      <td>${tag(i.estado, {enviada: 'enviado, sin contestar', respondida: 'contestado', aprobada: 'aprobado', contrato: 'con contrato', cancelada: 'cancelado'}[i.estado])}</td>
+      <td>${i.estado === 'enviada' ? `<button class="link" data-re="${i.id}">Reenviar</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Aún no has enviado cuestionarios</td></tr>'}
+    </tbody></table></div>`;
+  $('#eaGo').onclick = async () => {
+    const correo = val('eaC').toLowerCase(); if (!val('eaN') || !correoOk(correo)) return ($('#eaE').textContent = 'Escribe el nombre y un correo válido');
+    const b = $('#eaGo'); busy(b, 'Enviando…');
+    try { const i = await db.insert('invitaciones', {nombre: val('eaN').toUpperCase(), correo, celular: val('eaT').replace(/\D/g, ''), created_by: me.email}); avisoEnvio(await enviarCorreoAlta(i, url)); refresh(); }
+    catch (e) { busy(b); $('#eaE').textContent = errMsg(e); }
+  };
+  $('#ecGo').onclick = async () => {
+    const correo = val('ecC').toLowerCase(); if (!correoOk(correo)) return ($('#ecE').textContent = 'Escribe un correo válido');
+    const b = $('#ecGo'); busy(b, 'Enviando…');
+    try { const r = await enviarCorreoCambio(correo, val('ecN'), url); toast(r === 'enviado' ? 'Liga de cambio de cuenta enviada' : 'Se abrió tu correo con el mensaje listo: solo presiona Enviar'); $('#ecC').value = ''; $('#ecN').value = ''; }
+    catch (e) { $('#ecE').textContent = errMsg(e); }
+    busy(b);
+  };
+  $('#ecCopy').onclick = () => { navigator.clipboard.writeText(`${url}/cambio.html`); toast('Liga copiada'); };
+  $$('[data-re]', main).forEach(b => b.onclick = () => pedirCorreoYEnviar(mias.find(i => i.id === b.dataset.re), url));
+};
+
 /* ===================== Facturas y complementos de pago (todas las operaciones) ===================== */
 VIEWS.facturas = async main => {
   const arch = await db.list('archivos', {in: {tipo: ['factura', 'complemento']}, order: 'created_at', desc: true});
