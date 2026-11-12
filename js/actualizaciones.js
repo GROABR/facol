@@ -2,6 +2,7 @@
    Al abrir, la app de escritorio busca una versión nueva, la descarga sola y muestra un aviso para reiniciar.
    Después de actualizar (o la primera vez que abres una versión nueva) aparecen las novedades. */
 const NOVEDADES = [
+  {version: '1.7.4', puntos: ['Los formularios y el portal ahora están en groabr.github.io (ya no aparece un nombre personal en las ligas).']},
   {version: '1.7.3', puntos: ['Nuevo logo de GROA en el inicio de sesión, el menú, la ventana y el acceso directo.',
     'El correo del cuestionario de alta va firmado por "Colorines" (o por el cliente del módulo en el que estés).']},
   {version: '1.7.2', puntos: [
