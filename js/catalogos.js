@@ -129,8 +129,7 @@ const DATOS_VACIOS = {cliente: '', razon_social: '', rfc: '', empresa_factura: '
 async function datosColorines(mod = modulo) { const d = await getConfig(cfgModulo(mod, 'datos'), null); return {...(mod === 'colorines' ? DATOS_COLORINES : DATOS_VACIOS), ...(d || {})}; }
 const CAMPOS_DATOS = [['cliente', 'Cliente (nombre corto)'], ['razon_social', 'Nombre fiscal del cliente'], ['rfc', 'RFC del cliente'], ['empresa_factura', 'Empresa que factura'],
   ['banco_receptor', 'Banco receptor'], ['cuenta_receptora', 'Cuenta receptora'], ['banco_ordenante', 'Banco ordenante'], ['cuenta_ordenante', 'Cuenta ordenante'],
-  ['solicitante', 'Solicitante'], ['autorizado_por', 'Autorizado por'], ['concepto_factura', 'Concepto de la factura'], ['uso_cfdi', 'Uso CFDI'],
-  ['forma_pago_sat', 'Forma de pago (factura)'], ['metodo_pago', 'Método de pago (factura)']];
+  ['solicitante', 'Solicitante'], ['autorizado_por', 'Autorizado por']];   // forma de pago, uso CFDI, etc. salen tal cual del formato de factura estandarizado
 const FORMAS_PAGO = ['EFECTIVO', 'TRANSFERENCIA', 'TRANSFERENCIA/EFECTIVO', 'CASA'];
 
 VIEWS.esquemaColorines = async main => {
