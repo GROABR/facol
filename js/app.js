@@ -103,13 +103,14 @@ function hoja(rows, cols, texto = []) {
   return ws;
 }
 
-const FORMS_URL = 'https://gmoro27.github.io/facol-formularios';   // formularios públicos publicados en GitHub Pages
+const FORMS_URL = 'https://groabr.github.io/facol-formularios';    // formularios públicos (organización GROABR en GitHub Pages)
 /** Dirección de los formularios. Si en Ajustes se pegó la del repositorio (github.com/usuario/repo),
     se convierte a la de la página publicada (usuario.github.io/repo), que es la que sí abre el formulario. */
 const normalizarUrlForm = u => {
   u = String(u || '').trim().replace(/\/+$/, '').replace(/\/(alta|cambio)\.html.*$/i, '');
   const m = u.match(/^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/?#]+)/i);
-  if (m) return `https://${m[1].toLowerCase()}.github.io/${m[2]}`;
+  if (m) u = `https://${m[1].toLowerCase()}.github.io/${m[2]}`;
+  u = u.replace(/^https?:\/\/gmoro27\.github\.io\//i, 'https://groabr.github.io/');   // los formularios se movieron a la organización GROABR
   return u || FORMS_URL;
 };
 async function urlFormularios() { return normalizarUrlForm(await getConfig('formularios_url', FORMS_URL)); }
